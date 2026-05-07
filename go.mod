@@ -1,0 +1,1 @@
+module flutter-admin-go
