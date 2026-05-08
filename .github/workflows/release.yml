@@ -108,7 +108,7 @@ jobs:
       - name: Build admin web
         working-directory: front/admin
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Package admin web
