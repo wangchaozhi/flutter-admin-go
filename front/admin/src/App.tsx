@@ -360,6 +360,7 @@ function AdminDashboard({
   const [notice, setNotice] = useState('正在加载管理数据')
   const [error, setError] = useState('')
   const [avatarPreview, setAvatarPreview] = useState('')
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
 
   const roleNameByID = useMemo(
     () => new Map(roles.map((role) => [role.id, role.name])),
@@ -548,6 +549,7 @@ function AdminDashboard({
 
   async function uploadAvatar(file: File | undefined) {
     if (!file) return
+    setUserMenuOpen(false)
     setSaving(true)
     setError('')
     try {
@@ -610,35 +612,47 @@ function AdminDashboard({
             <p className="toolbar-subtitle">PostgreSQL + GORM 驱动的后台权限面板。</p>
           </div>
           <div className="toolbar-actions">
-            <span className="session-pill">
-              {avatarPreview ? (
-                <img alt={`${session.username} 头像`} src={avatarPreview} />
-              ) : (
-                <BadgeCheck size={14} />
-              )}
-              {session.username}
-            </span>
-            <label className="avatar-upload">
-              <ImageUp size={15} />
-              头像
-              <input
-                accept="image/png,image/jpeg"
-                type="file"
-                onChange={(event) => {
-                  void uploadAvatar(event.target.files?.[0])
-                  event.target.value = ''
-                }}
-              />
-            </label>
             <button className="ghost-button" type="button" onClick={loadAll}>
               <RefreshCw size={15} />
               刷新
             </button>
             <ThemeButton theme={theme} onThemeChange={onThemeChange} />
-            <button className="ghost-button" type="button" onClick={onLogout}>
-              <LogOut size={15} />
-              退出
-            </button>
+            <div className="user-menu">
+              <button
+                className="session-pill"
+                type="button"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((open) => !open)}
+              >
+                {avatarPreview ? (
+                  <img alt={`${session.username} 头像`} src={avatarPreview} />
+                ) : (
+                  <BadgeCheck size={14} />
+                )}
+                <span>{session.username}</span>
+                <ChevronRight className={userMenuOpen ? 'menu-chevron open' : 'menu-chevron'} size={15} />
+              </button>
+              {userMenuOpen && (
+                <div className="user-menu-popover">
+                  <label className="user-menu-item">
+                    <ImageUp size={15} />
+                    更换头像
+                    <input
+                      accept="image/png,image/jpeg"
+                      type="file"
+                      onChange={(event) => {
+                        void uploadAvatar(event.target.files?.[0])
+                        event.target.value = ''
+                      }}
+                    />
+                  </label>
+                  <button className="user-menu-item danger" type="button" onClick={onLogout}>
+                    <LogOut size={15} />
+                    退出登录
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

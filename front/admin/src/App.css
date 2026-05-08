@@ -250,6 +250,7 @@ button:disabled {
   color: var(--text-muted);
   background: var(--surface);
   font-size: 13px;
+  cursor: pointer;
 }
 
 .session-pill img {
@@ -259,28 +260,65 @@ button:disabled {
   object-fit: cover;
 }
 
-.avatar-upload {
+.session-pill:hover {
+  background: var(--surface-subtle);
+}
+
+.user-menu {
+  position: relative;
+}
+
+.menu-chevron {
+  color: var(--text-faint);
+  transform: rotate(90deg);
+  transition: transform 140ms ease;
+}
+
+.menu-chevron.open {
+  transform: rotate(-90deg);
+}
+
+.user-menu-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 168px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.user-menu-item {
   min-height: 34px;
   display: inline-flex;
   grid-template-columns: none;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid var(--border-strong);
+  justify-content: flex-start;
+  gap: 8px;
+  border: 0;
   border-radius: 6px;
-  padding: 0 12px;
+  padding: 0 10px;
   color: var(--text);
-  background: var(--surface);
+  background: transparent;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }
 
-.avatar-upload:hover {
+.user-menu-item:hover {
   background: var(--surface-subtle);
 }
 
-.avatar-upload input {
+.user-menu-item.danger {
+  color: var(--danger-text);
+}
+
+.user-menu-item input {
   display: none;
 }
 
