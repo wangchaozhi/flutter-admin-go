@@ -685,6 +685,39 @@ function AdminDashboard({
 
         {active === 'users' && (
           <section className="content-grid">
+            <section className="table-panel">
+              <PanelTitle title="用户列表" count={users.length} />
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>用户名</th>
+                      <th>昵称</th>
+                      <th>角色</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((user) => (
+                      <tr key={user.id}>
+                        <td>{user.username}</td>
+                        <td>{user.nickname || '-'}</td>
+                        <td>{formatNames(user.roleIds, roleNameByID)}</td>
+                        <td>
+                          <RowActions
+                            canEdit={can('user:edit')}
+                            canDelete={can('user:delete')}
+                            onEdit={() => setUserForm({ ...user, password: '' })}
+                            onDelete={() => deleteRecord('users', user.id)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
             <form className="editor-panel" onSubmit={saveUser}>
               <PanelTitle title={userForm.id ? '编辑用户' : '新增用户'} />
               <label>
@@ -734,31 +767,35 @@ function AdminDashboard({
                 onReset={() => setUserForm(emptyUser)}
               />
             </form>
+          </section>
+        )}
 
+        {active === 'roles' && (
+          <section className="content-grid">
             <section className="table-panel">
-              <PanelTitle title="用户列表" count={users.length} />
+              <PanelTitle title="角色列表" count={roles.length} />
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>用户名</th>
-                      <th>昵称</th>
                       <th>角色</th>
+                      <th>标识</th>
+                      <th>菜单权限</th>
                       <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((user) => (
-                      <tr key={user.id}>
-                        <td>{user.username}</td>
-                        <td>{user.nickname || '-'}</td>
-                        <td>{formatNames(user.roleIds, roleNameByID)}</td>
+                    {roles.map((role) => (
+                      <tr key={role.id}>
+                        <td>{role.name}</td>
+                        <td>{role.key}</td>
+                        <td>{formatNames(role.menuIds, menuNameByID)}</td>
                         <td>
                           <RowActions
-                            canEdit={can('user:edit')}
-                            canDelete={can('user:delete')}
-                            onEdit={() => setUserForm({ ...user, password: '' })}
-                            onDelete={() => deleteRecord('users', user.id)}
+                            canEdit={can('role:edit')}
+                            canDelete={can('role:delete')}
+                            onEdit={() => setRoleForm(role)}
+                            onDelete={() => deleteRecord('roles', role.id)}
                           />
                         </td>
                       </tr>
@@ -767,11 +804,7 @@ function AdminDashboard({
                 </table>
               </div>
             </section>
-          </section>
-        )}
 
-        {active === 'roles' && (
-          <section className="content-grid">
             <form className="editor-panel" onSubmit={saveRole}>
               <PanelTitle title={roleForm.id ? '编辑角色' : '新增角色'} />
               <label>
@@ -817,44 +850,27 @@ function AdminDashboard({
                 onReset={() => setRoleForm(emptyRole)}
               />
             </form>
-
-            <section className="table-panel">
-              <PanelTitle title="角色列表" count={roles.length} />
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>角色</th>
-                      <th>标识</th>
-                      <th>菜单权限</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roles.map((role) => (
-                      <tr key={role.id}>
-                        <td>{role.name}</td>
-                        <td>{role.key}</td>
-                        <td>{formatNames(role.menuIds, menuNameByID)}</td>
-                        <td>
-                          <RowActions
-                            canEdit={can('role:edit')}
-                            canDelete={can('role:delete')}
-                            onEdit={() => setRoleForm(role)}
-                            onDelete={() => deleteRecord('roles', role.id)}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
           </section>
         )}
 
         {active === 'menus' && (
           <section className="content-grid">
+            <section className="table-panel">
+              <PanelTitle title="菜单结构" count={menus.length} />
+              <div className="menu-tree">
+                {menuTree.map((node) => (
+                  <MenuNode
+                    key={node.id}
+                    node={node}
+                    onEdit={(menu) => setMenuForm(menu)}
+                    onDelete={(id) => deleteRecord('menus', id)}
+                    canEdit={can('menu:edit')}
+                    canDelete={can('menu:delete')}
+                  />
+                ))}
+              </div>
+            </section>
+
             <form className="editor-panel" onSubmit={saveMenu}>
               <PanelTitle title={menuForm.id ? '编辑菜单' : '新增菜单'} />
               <label>
@@ -934,22 +950,6 @@ function AdminDashboard({
                 onReset={() => setMenuForm(emptyMenu)}
               />
             </form>
-
-            <section className="table-panel">
-              <PanelTitle title="菜单结构" count={menus.length} />
-              <div className="menu-tree">
-                {menuTree.map((node) => (
-                  <MenuNode
-                    key={node.id}
-                    node={node}
-                    onEdit={(menu) => setMenuForm(menu)}
-                    onDelete={(id) => deleteRecord('menus', id)}
-                    canEdit={can('menu:edit')}
-                    canDelete={can('menu:delete')}
-                  />
-                ))}
-              </div>
-            </section>
           </section>
         )}
       </section>
@@ -1102,12 +1102,29 @@ function MenuNode({
   canEdit: boolean
   canDelete: boolean
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const hasChildren = node.children.length > 0
+
   return (
     <div className="menu-node">
       <div className="menu-node-row">
-        <div>
-          <strong>{node.name}</strong>
-          <span>{node.type === 'button' ? node.permission : node.path}</span>
+        <div className="menu-node-main">
+          {hasChildren ? (
+            <button
+              className="menu-expand"
+              type="button"
+              aria-label={expanded ? '收起菜单' : '展开菜单'}
+              onClick={() => setExpanded((open) => !open)}
+            >
+              <ChevronRight className={expanded ? 'open' : ''} size={15} />
+            </button>
+          ) : (
+            <span className="menu-expand-placeholder" />
+          )}
+          <div>
+            <strong>{node.name}</strong>
+            <span>{node.type === 'button' ? node.permission : node.path}</span>
+          </div>
         </div>
         <RowActions
           canEdit={canEdit}
@@ -1116,7 +1133,7 @@ function MenuNode({
           onDelete={() => onDelete(node.id)}
         />
       </div>
-      {node.children.length > 0 && (
+      {hasChildren && expanded && (
         <div className="menu-children">
           {node.children.map((child) => (
             <MenuNode

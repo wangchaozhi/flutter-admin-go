@@ -386,7 +386,7 @@ h2 {
 
 .content-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
   gap: 16px;
   align-items: start;
 }
@@ -630,6 +630,43 @@ td {
   border-radius: 8px;
   padding: 11px;
   background: var(--surface);
+}
+
+.menu-node-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-expand,
+.menu-expand-placeholder {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+}
+
+.menu-expand {
+  min-height: 24px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.menu-expand:hover {
+  background: var(--surface-subtle);
+}
+
+.menu-expand svg {
+  transition: transform 140ms ease;
+}
+
+.menu-expand svg.open {
+  transform: rotate(90deg);
+}
+
+.menu-expand-placeholder {
+  display: inline-block;
 }
 
 .menu-node strong,
