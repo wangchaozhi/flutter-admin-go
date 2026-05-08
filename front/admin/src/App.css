@@ -688,6 +688,47 @@ td {
   border-left: 1px solid var(--border);
 }
 
+.confirm-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.confirm-dialog p {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.danger-confirm {
+  background: var(--danger-text);
+  border-color: var(--danger-text);
+  color: #fff;
+}
+
 @media (max-width: 900px) {
   .admin-shell,
   .content-grid {

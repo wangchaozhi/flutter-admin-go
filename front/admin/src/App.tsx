@@ -75,6 +75,12 @@ type Profile = {
 type UserForm = Omit<User, 'id'> & { id?: number; password: string }
 type RoleForm = Omit<Role, 'id'> & { id?: number }
 type MenuForm = Omit<Menu, 'id'> & { id?: number }
+type ConfirmDialogState = {
+  title: string
+  message: string
+  confirmLabel: string
+  onConfirm: () => void
+}
 
 const emptyUser: UserForm = {
   username: '',
@@ -361,6 +367,7 @@ function AdminDashboard({
   const [error, setError] = useState('')
   const [avatarPreview, setAvatarPreview] = useState('')
   const [avatarRefreshKey, setAvatarRefreshKey] = useState(0)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -557,8 +564,17 @@ function AdminDashboard({
     }
   }
 
-  async function deleteRecord(entity: Entity, id: number) {
-    if (!window.confirm('确定删除这条数据吗？')) return
+  function deleteRecord(entity: Entity, id: number) {
+    setConfirmDialog({
+      title: '确认删除',
+      message: '删除后无法恢复，确定要删除这条数据吗？',
+      confirmLabel: '删除',
+      onConfirm: () => void performDeleteRecord(entity, id),
+    })
+  }
+
+  async function performDeleteRecord(entity: Entity, id: number) {
+    setConfirmDialog(null)
     setSaving(true)
     setError('')
     try {
@@ -688,276 +704,422 @@ function AdminDashboard({
         </div>
 
         {active === 'users' && (
-          <section className="content-grid">
-            <section className="table-panel">
-              <PanelTitle title="用户列表" count={users.length} />
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>用户名</th>
-                      <th>昵称</th>
-                      <th>角色</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map((user) => (
-                      <tr key={user.id}>
-                        <td>{user.username}</td>
-                        <td>{user.nickname || '-'}</td>
-                        <td>{formatNames(user.roleIds, roleNameByID)}</td>
-                        <td>
-                          <RowActions
-                            canEdit={can('user:edit')}
-                            canDelete={can('user:delete')}
-                            onEdit={() => setUserForm({ ...user, password: '' })}
-                            onDelete={() => deleteRecord('users', user.id)}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <form className="editor-panel" onSubmit={saveUser}>
-              <PanelTitle title={userForm.id ? '编辑用户' : '新增用户'} />
-              <label>
-                用户名
-                <input
-                  value={userForm.username}
-                  onChange={(event) =>
-                    setUserForm({ ...userForm, username: event.target.value })
-                  }
-                  placeholder="admin"
-                />
-              </label>
-              <label>
-                昵称
-                <input
-                  value={userForm.nickname}
-                  onChange={(event) =>
-                    setUserForm({ ...userForm, nickname: event.target.value })
-                  }
-                  placeholder="管理员"
-                />
-              </label>
-              <label>
-                密码
-                <input
-                  type="password"
-                  value={userForm.password}
-                  onChange={(event) =>
-                    setUserForm({ ...userForm, password: event.target.value })
-                  }
-                  placeholder={userForm.id ? '留空不修改' : '请输入密码'}
-                />
-              </label>
-              <CheckboxGroup
-                label="分配角色"
-                items={roles}
-                selected={userForm.roleIds}
-                getLabel={(role) => role.name}
-                onChange={(roleIds) => setUserForm({ ...userForm, roleIds })}
-              />
-              <FormActions
-                busy={saving}
-                editing={Boolean(userForm.id)}
-                createPermission="user:create"
-                editPermission="user:edit"
-                can={can}
-                onReset={() => setUserForm(emptyUser)}
-              />
-            </form>
-          </section>
+          <UserManagementSection
+            users={users}
+            roles={roles}
+            roleNameByID={roleNameByID}
+            userForm={userForm}
+            saving={saving}
+            can={can}
+            onUserFormChange={setUserForm}
+            onSaveUser={saveUser}
+            onDeleteUser={(id) => deleteRecord('users', id)}
+          />
         )}
 
         {active === 'roles' && (
-          <section className="content-grid">
-            <section className="table-panel">
-              <PanelTitle title="角色列表" count={roles.length} />
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>角色</th>
-                      <th>标识</th>
-                      <th>菜单权限</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roles.map((role) => (
-                      <tr key={role.id}>
-                        <td>{role.name}</td>
-                        <td>{role.key}</td>
-                        <td>{formatNames(role.menuIds, menuNameByID)}</td>
-                        <td>
-                          <RowActions
-                            canEdit={can('role:edit')}
-                            canDelete={can('role:delete')}
-                            onEdit={() => setRoleForm(role)}
-                            onDelete={() => deleteRecord('roles', role.id)}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <form className="editor-panel" onSubmit={saveRole}>
-              <PanelTitle title={roleForm.id ? '编辑角色' : '新增角色'} />
-              <label>
-                角色名称
-                <input
-                  value={roleForm.name}
-                  onChange={(event) =>
-                    setRoleForm({ ...roleForm, name: event.target.value })
-                  }
-                  placeholder="运营管理员"
-                />
-              </label>
-              <label>
-                角色标识
-                <input
-                  value={roleForm.key}
-                  onChange={(event) =>
-                    setRoleForm({ ...roleForm, key: event.target.value })
-                  }
-                  placeholder="operator"
-                />
-              </label>
-              <CheckboxGroup
-                label="菜单权限"
-                items={pageMenus}
-                selected={roleForm.menuIds}
-                getLabel={(menu) => menu.name}
-                onChange={(menuIds) => setRoleForm({ ...roleForm, menuIds })}
-              />
-              <CheckboxGroup
-                label="按钮权限"
-                items={buttonMenus}
-                selected={roleForm.menuIds}
-                getLabel={(menu) => `${menu.name} (${menu.permission})`}
-                onChange={(menuIds) => setRoleForm({ ...roleForm, menuIds })}
-              />
-              <FormActions
-                busy={saving}
-                editing={Boolean(roleForm.id)}
-                createPermission="role:create"
-                editPermission="role:edit"
-                can={can}
-                onReset={() => setRoleForm(emptyRole)}
-              />
-            </form>
-          </section>
+          <RoleManagementSection
+            roles={roles}
+            pageMenus={pageMenus}
+            buttonMenus={buttonMenus}
+            menuNameByID={menuNameByID}
+            roleForm={roleForm}
+            saving={saving}
+            can={can}
+            onRoleFormChange={setRoleForm}
+            onSaveRole={saveRole}
+            onDeleteRole={(id) => deleteRecord('roles', id)}
+          />
         )}
 
         {active === 'menus' && (
-          <section className="content-grid">
-            <section className="table-panel">
-              <PanelTitle title="菜单结构" count={menus.length} />
-              <div className="menu-tree">
-                {menuTree.map((node) => (
-                  <MenuNode
-                    key={node.id}
-                    node={node}
-                    onEdit={(menu) => setMenuForm(menu)}
-                    onDelete={(id) => deleteRecord('menus', id)}
-                    canEdit={can('menu:edit')}
-                    canDelete={can('menu:delete')}
-                  />
-                ))}
-              </div>
-            </section>
-
-            <form className="editor-panel" onSubmit={saveMenu}>
-              <PanelTitle title={menuForm.id ? '编辑菜单' : '新增菜单'} />
-              <label>
-                类型
-                <select
-                  value={menuForm.type}
-                  onChange={(event) =>
-                    setMenuForm({
-                      ...menuForm,
-                      type: event.target.value as MenuForm['type'],
-                      path: event.target.value === 'button' ? '' : menuForm.path,
-                      permission: event.target.value === 'menu' ? '' : menuForm.permission,
-                    })
-                  }
-                >
-                  <option value="menu">菜单</option>
-                  <option value="button">按钮</option>
-                </select>
-              </label>
-              <label>
-                菜单名称
-                <input
-                  value={menuForm.name}
-                  onChange={(event) =>
-                    setMenuForm({ ...menuForm, name: event.target.value })
-                  }
-                  placeholder="系统管理"
-                />
-              </label>
-              <label>
-                路由路径
-                <input
-                  disabled={menuForm.type === 'button'}
-                  value={menuForm.path}
-                  onChange={(event) =>
-                    setMenuForm({ ...menuForm, path: event.target.value })
-                  }
-                  placeholder="/system/user"
-                />
-              </label>
-              {menuForm.type === 'button' && (
-                <label>
-                  权限标识
-                  <input
-                    value={menuForm.permission}
-                    onChange={(event) =>
-                      setMenuForm({ ...menuForm, permission: event.target.value })
-                    }
-                    placeholder="user:create"
-                  />
-                </label>
-              )}
-              <label>
-                上级菜单
-                <select
-                  value={menuForm.parentId}
-                  onChange={(event) =>
-                    setMenuForm({ ...menuForm, parentId: Number(event.target.value) })
-                  }
-                >
-                  <option value={0}>顶级菜单</option>
-                  {pageMenus
-                    .filter((menu) => menu.id !== menuForm.id)
-                    .map((menu) => (
-                      <option key={menu.id} value={menu.id}>
-                        {menu.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <FormActions
-                busy={saving}
-                editing={Boolean(menuForm.id)}
-                createPermission="menu:create"
-                editPermission="menu:edit"
-                can={can}
-                onReset={() => setMenuForm(emptyMenu)}
-              />
-            </form>
-          </section>
+          <MenuManagementSection
+            menus={menus}
+            menuTree={menuTree}
+            pageMenus={pageMenus}
+            menuForm={menuForm}
+            saving={saving}
+            can={can}
+            onMenuFormChange={setMenuForm}
+            onSaveMenu={saveMenu}
+            onDeleteMenu={(id) => deleteRecord('menus', id)}
+          />
         )}
       </section>
+
+      <ConfirmDialog
+        state={confirmDialog}
+        busy={saving}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </main>
+  )
+}
+
+function UserManagementSection({
+  users,
+  roles,
+  roleNameByID,
+  userForm,
+  saving,
+  can,
+  onUserFormChange,
+  onSaveUser,
+  onDeleteUser,
+}: {
+  users: User[]
+  roles: Role[]
+  roleNameByID: Map<number, string>
+  userForm: UserForm
+  saving: boolean
+  can: (permission: string) => boolean
+  onUserFormChange: (form: UserForm) => void
+  onSaveUser: (event: FormEvent) => void
+  onDeleteUser: (id: number) => void
+}) {
+  return (
+    <section className="content-grid">
+      <section className="table-panel">
+        <PanelTitle title="用户列表" count={users.length} />
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>昵称</th>
+                <th>角色</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.username}</td>
+                  <td>{user.nickname || '-'}</td>
+                  <td>{formatNames(user.roleIds, roleNameByID)}</td>
+                  <td>
+                    <RowActions
+                      canEdit={can('user:edit')}
+                      canDelete={can('user:delete')}
+                      onEdit={() => onUserFormChange({ ...user, password: '' })}
+                      onDelete={() => onDeleteUser(user.id)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <form className="editor-panel" onSubmit={onSaveUser}>
+        <PanelTitle title={userForm.id ? '编辑用户' : '新增用户'} />
+        <label>
+          用户名
+          <input
+            value={userForm.username}
+            onChange={(event) =>
+              onUserFormChange({ ...userForm, username: event.target.value })
+            }
+            placeholder="admin"
+          />
+        </label>
+        <label>
+          昵称
+          <input
+            value={userForm.nickname}
+            onChange={(event) =>
+              onUserFormChange({ ...userForm, nickname: event.target.value })
+            }
+            placeholder="管理员"
+          />
+        </label>
+        <label>
+          密码
+          <input
+            type="password"
+            value={userForm.password}
+            onChange={(event) =>
+              onUserFormChange({ ...userForm, password: event.target.value })
+            }
+            placeholder={userForm.id ? '留空不修改' : '请输入密码'}
+          />
+        </label>
+        <CheckboxGroup
+          label="分配角色"
+          items={roles}
+          selected={userForm.roleIds}
+          getLabel={(role) => role.name}
+          onChange={(roleIds) => onUserFormChange({ ...userForm, roleIds })}
+        />
+        <FormActions
+          busy={saving}
+          editing={Boolean(userForm.id)}
+          createPermission="user:create"
+          editPermission="user:edit"
+          can={can}
+          onReset={() => onUserFormChange(emptyUser)}
+        />
+      </form>
+    </section>
+  )
+}
+
+function RoleManagementSection({
+  roles,
+  pageMenus,
+  buttonMenus,
+  menuNameByID,
+  roleForm,
+  saving,
+  can,
+  onRoleFormChange,
+  onSaveRole,
+  onDeleteRole,
+}: {
+  roles: Role[]
+  pageMenus: Menu[]
+  buttonMenus: Menu[]
+  menuNameByID: Map<number, string>
+  roleForm: RoleForm
+  saving: boolean
+  can: (permission: string) => boolean
+  onRoleFormChange: (form: RoleForm) => void
+  onSaveRole: (event: FormEvent) => void
+  onDeleteRole: (id: number) => void
+}) {
+  return (
+    <section className="content-grid">
+      <section className="table-panel">
+        <PanelTitle title="角色列表" count={roles.length} />
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>角色</th>
+                <th>标识</th>
+                <th>菜单权限</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map((role) => (
+                <tr key={role.id}>
+                  <td>{role.name}</td>
+                  <td>{role.key}</td>
+                  <td>{formatNames(role.menuIds, menuNameByID)}</td>
+                  <td>
+                    <RowActions
+                      canEdit={can('role:edit')}
+                      canDelete={can('role:delete')}
+                      onEdit={() => onRoleFormChange(role)}
+                      onDelete={() => onDeleteRole(role.id)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <form className="editor-panel" onSubmit={onSaveRole}>
+        <PanelTitle title={roleForm.id ? '编辑角色' : '新增角色'} />
+        <label>
+          角色名称
+          <input
+            value={roleForm.name}
+            onChange={(event) => onRoleFormChange({ ...roleForm, name: event.target.value })}
+            placeholder="运营管理员"
+          />
+        </label>
+        <label>
+          角色标识
+          <input
+            value={roleForm.key}
+            onChange={(event) => onRoleFormChange({ ...roleForm, key: event.target.value })}
+            placeholder="operator"
+          />
+        </label>
+        <CheckboxGroup
+          label="菜单权限"
+          items={pageMenus}
+          selected={roleForm.menuIds}
+          getLabel={(menu) => menu.name}
+          onChange={(menuIds) => onRoleFormChange({ ...roleForm, menuIds })}
+        />
+        <CheckboxGroup
+          label="按钮权限"
+          items={buttonMenus}
+          selected={roleForm.menuIds}
+          getLabel={(menu) => `${menu.name} (${menu.permission})`}
+          onChange={(menuIds) => onRoleFormChange({ ...roleForm, menuIds })}
+        />
+        <FormActions
+          busy={saving}
+          editing={Boolean(roleForm.id)}
+          createPermission="role:create"
+          editPermission="role:edit"
+          can={can}
+          onReset={() => onRoleFormChange(emptyRole)}
+        />
+      </form>
+    </section>
+  )
+}
+
+function MenuManagementSection({
+  menus,
+  menuTree,
+  pageMenus,
+  menuForm,
+  saving,
+  can,
+  onMenuFormChange,
+  onSaveMenu,
+  onDeleteMenu,
+}: {
+  menus: Menu[]
+  menuTree: MenuNodeType[]
+  pageMenus: Menu[]
+  menuForm: MenuForm
+  saving: boolean
+  can: (permission: string) => boolean
+  onMenuFormChange: (form: MenuForm) => void
+  onSaveMenu: (event: FormEvent) => void
+  onDeleteMenu: (id: number) => void
+}) {
+  return (
+    <section className="content-grid">
+      <section className="table-panel">
+        <PanelTitle title="菜单结构" count={menus.length} />
+        <div className="menu-tree">
+          {menuTree.map((node) => (
+            <MenuNode
+              key={node.id}
+              node={node}
+              onEdit={(menu) => onMenuFormChange(menu)}
+              onDelete={onDeleteMenu}
+              canEdit={can('menu:edit')}
+              canDelete={can('menu:delete')}
+            />
+          ))}
+        </div>
+      </section>
+
+      <form className="editor-panel" onSubmit={onSaveMenu}>
+        <PanelTitle title={menuForm.id ? '编辑菜单' : '新增菜单'} />
+        <label>
+          类型
+          <select
+            value={menuForm.type}
+            onChange={(event) =>
+              onMenuFormChange({
+                ...menuForm,
+                type: event.target.value as MenuForm['type'],
+                path: event.target.value === 'button' ? '' : menuForm.path,
+                permission: event.target.value === 'menu' ? '' : menuForm.permission,
+              })
+            }
+          >
+            <option value="menu">菜单</option>
+            <option value="button">按钮</option>
+          </select>
+        </label>
+        <label>
+          菜单名称
+          <input
+            value={menuForm.name}
+            onChange={(event) => onMenuFormChange({ ...menuForm, name: event.target.value })}
+            placeholder="系统管理"
+          />
+        </label>
+        <label>
+          路由路径
+          <input
+            disabled={menuForm.type === 'button'}
+            value={menuForm.path}
+            onChange={(event) => onMenuFormChange({ ...menuForm, path: event.target.value })}
+            placeholder="/system/user"
+          />
+        </label>
+        {menuForm.type === 'button' && (
+          <label>
+            权限标识
+            <input
+              value={menuForm.permission}
+              onChange={(event) =>
+                onMenuFormChange({ ...menuForm, permission: event.target.value })
+              }
+              placeholder="user:create"
+            />
+          </label>
+        )}
+        <label>
+          上级菜单
+          <select
+            value={menuForm.parentId}
+            onChange={(event) =>
+              onMenuFormChange({ ...menuForm, parentId: Number(event.target.value) })
+            }
+          >
+            <option value={0}>顶级菜单</option>
+            {pageMenus
+              .filter((menu) => menu.id !== menuForm.id)
+              .map((menu) => (
+                <option key={menu.id} value={menu.id}>
+                  {menu.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <FormActions
+          busy={saving}
+          editing={Boolean(menuForm.id)}
+          createPermission="menu:create"
+          editPermission="menu:edit"
+          can={can}
+          onReset={() => onMenuFormChange(emptyMenu)}
+        />
+      </form>
+    </section>
+  )
+}
+
+function ConfirmDialog({
+  state,
+  busy,
+  onCancel,
+}: {
+  state: ConfirmDialogState | null
+  busy: boolean
+  onCancel: () => void
+}) {
+  if (!state) return null
+
+  return (
+    <div className="confirm-backdrop" role="presentation" onMouseDown={onCancel}>
+      <section
+        aria-modal="true"
+        className="confirm-dialog"
+        role="dialog"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div>
+          <h2>{state.title}</h2>
+          <p>{state.message}</p>
+        </div>
+        <div className="confirm-actions">
+          <button className="ghost-button" disabled={busy} type="button" onClick={onCancel}>
+            取消
+          </button>
+          <button className="primary-button danger-confirm" disabled={busy} type="button" onClick={state.onConfirm}>
+            <Trash2 size={15} />
+            {state.confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
   )
 }
 
