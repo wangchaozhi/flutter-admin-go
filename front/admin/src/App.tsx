@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   BadgeCheck,
@@ -361,6 +361,7 @@ function AdminDashboard({
   const [error, setError] = useState('')
   const [avatarPreview, setAvatarPreview] = useState('')
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement | null>(null)
 
   const roleNameByID = useMemo(
     () => new Map(roles.map((role) => [role.id, role.name])),
@@ -415,6 +416,27 @@ function AdminDashboard({
       setActive(visibleTabs[0].key)
     }
   }, [active, visibleTabs])
+
+  useEffect(() => {
+    if (!userMenuOpen) return
+
+    function closeUserMenu(event: Event) {
+      const menu = userMenuRef.current
+      if (!menu) return
+
+      const path = event.composedPath()
+      if (!path.includes(menu)) {
+        setUserMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', closeUserMenu, true)
+    document.addEventListener('touchstart', closeUserMenu, true)
+    return () => {
+      document.removeEventListener('mousedown', closeUserMenu, true)
+      document.removeEventListener('touchstart', closeUserMenu, true)
+    }
+  }, [userMenuOpen])
 
   useEffect(() => {
     if (!session.thumbnailUrl) {
@@ -617,7 +639,7 @@ function AdminDashboard({
               刷新
             </button>
             <ThemeButton theme={theme} onThemeChange={onThemeChange} />
-            <div className="user-menu">
+            <div className="user-menu" ref={userMenuRef}>
               <button
                 className="session-pill"
                 type="button"
