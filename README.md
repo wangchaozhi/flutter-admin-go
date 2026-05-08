@@ -7,13 +7,15 @@
 ```text
 .
 ├── docker-compose.yml                 # PostgreSQL + MinIO 本地开发环境
-├── cmd/server/main.go                 # Go 服务入口
-├── internal/
-│   ├── admin/                         # 管理端接口
-│   ├── auth/                          # 登录接口
-│   ├── server/                        # 路由和 CORS
-│   └── store/                         # GORM、PostgreSQL、SQL 迁移
-│       └── migrations/                # 模块化 SQL 迁移文件
+├── backend/                           # Go 后端模块
+│   ├── go.mod / go.sum                # 后端依赖
+│   ├── cmd/server/main.go             # Go 服务入口
+│   └── internal/
+│       ├── admin/                     # 管理端接口
+│       ├── auth/                      # 登录接口
+│       ├── server/                    # 路由和 CORS
+│       └── store/                     # GORM、PostgreSQL、SQL 迁移
+│           └── migrations/            # 模块化 SQL 迁移文件
 ├── front/admin/                       # React + TypeScript + Vite 管理端
 └── front/mobile/                      # Flutter 移动端
 ```
@@ -44,6 +46,7 @@ password=admin_go_password
 后端默认会使用上面的连接。也可以通过 `DATABASE_DSN` 覆盖：
 
 ```bash
+cd backend
 DATABASE_DSN="host=localhost port=5432 user=admin_go password=admin_go_password dbname=flutter_admin_go sslmode=disable TimeZone=Asia/Shanghai" go run ./cmd/server
 ```
 
@@ -70,6 +73,7 @@ MINIO_AVATAR_BUCKET
 ## 启动后端
 
 ```bash
+cd backend
 go mod download
 go run ./cmd/server
 ```
@@ -80,7 +84,7 @@ go run ./cmd/server
 http://localhost:8080
 ```
 
-首次启动会自动执行 `internal/store/migrations/*.sql`。已执行版本记录在 `schema_migrations` 表中。
+首次启动会自动执行 `backend/internal/store/migrations/*.sql`。已执行版本记录在 `schema_migrations` 表中。
 后端也会自动创建头像 bucket。用户主题、头像对象 key 和缩略图对象 key 由迁移文件写入 `admin_users` 扩展字段。
 
 健康检查：
@@ -175,6 +179,7 @@ docker compose logs -f postgres
 docker compose logs -f minio
 
 # 后端
+cd backend
 go run ./cmd/server
 go test ./...
 

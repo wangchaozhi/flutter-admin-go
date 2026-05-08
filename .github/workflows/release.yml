@@ -76,14 +76,16 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: backend/go.mod
           cache: true
+          cache-dependency-path: backend/go.sum
 
       - name: Build backend packages
         shell: bash
+        working-directory: backend
         run: |
           set -euo pipefail
-          mkdir -p dist/backend
+          mkdir -p ../dist/backend
           targets=(
             "linux amd64 flutter-admin-go"
             "windows amd64 flutter-admin-go.exe"
@@ -92,11 +94,11 @@ jobs:
           )
           for target in "${targets[@]}"; do
             read -r goos goarch output <<< "$target"
-            out_dir="dist/backend/flutter-admin-go-${{ inputs.tag }}-${goos}-${goarch}"
+            out_dir="../dist/backend/flutter-admin-go-${{ inputs.tag }}-${goos}-${goarch}"
             mkdir -p "$out_dir"
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$out_dir/$output" .
-            cp README.md "$out_dir/"
-            tar -czf "dist/flutter-admin-go-${{ inputs.tag }}-backend-${goos}-${goarch}.tar.gz" -C "dist/backend" "$(basename "$out_dir")"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$out_dir/$output" ./cmd/server
+            cp ../README.md "$out_dir/"
+            tar -czf "../dist/flutter-admin-go-${{ inputs.tag }}-backend-${goos}-${goarch}.tar.gz" -C "../dist/backend" "$(basename "$out_dir")"
           done
 
       - name: Setup Node.js
