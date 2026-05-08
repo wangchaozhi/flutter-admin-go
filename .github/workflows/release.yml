@@ -65,6 +65,7 @@ jobs:
     name: Build backend and admin web
     runs-on: ubuntu-latest
     needs: prepare
+    continue-on-error: true
 
     steps:
       - name: Checkout tag
@@ -129,6 +130,7 @@ jobs:
     name: Build Flutter Android, web and Linux
     runs-on: ubuntu-latest
     needs: prepare
+    continue-on-error: true
 
     steps:
       - name: Checkout tag
@@ -183,6 +185,7 @@ jobs:
     name: Build Flutter Windows
     runs-on: windows-latest
     needs: prepare
+    continue-on-error: true
 
     steps:
       - name: Checkout tag
@@ -220,6 +223,7 @@ jobs:
     name: Build Flutter macOS
     runs-on: macos-latest
     needs: prepare
+    continue-on-error: true
 
     steps:
       - name: Checkout tag
@@ -262,6 +266,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    if: ${{ always() && needs.prepare.result == 'success' }}
     needs:
       - prepare
       - build-backend-admin
@@ -272,9 +277,21 @@ jobs:
     steps:
       - name: Download release assets
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           path: dist
           merge-multiple: true
+
+      - name: Check release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! find dist -maxdepth 1 -type f | grep -q .; then
+            echo "No release assets were produced."
+            exit 1
+          fi
+          echo "Release assets:"
+          find dist -maxdepth 1 -type f -printf " - %f\n" | sort
 
       - name: Generate checksums
         shell: bash
