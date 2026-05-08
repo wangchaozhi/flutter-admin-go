@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:forui/forui.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api_client.dart';
+import 'login_storage.dart';
+import 'widgets/login_header.dart';
 
 class MobileLoginPage extends StatefulWidget {
   const MobileLoginPage({super.key});
@@ -12,10 +12,7 @@ class MobileLoginPage extends StatefulWidget {
 }
 
 class _MobileLoginPageState extends State<MobileLoginPage> {
-  static const _rememberKey = 'mobile.remember';
-  static const _usernameKey = 'mobile.username';
-  static const _passwordKey = 'mobile.password';
-
+  final _storage = LoginStorage();
   final _usernameController = TextEditingController(text: 'user');
   final _passwordController = TextEditingController();
 
@@ -39,17 +36,13 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
   }
 
   Future<void> _loadSavedLogin() async {
-    final prefs = await SharedPreferences.getInstance();
+    final saved = await _storage.load();
     if (!mounted) return;
 
-    final remember = prefs.getBool(_rememberKey) ?? false;
-    _usernameController.text = prefs.getString(_usernameKey) ?? 'user';
-    _passwordController.text = remember
-        ? prefs.getString(_passwordKey) ?? ''
-        : '';
-
+    _usernameController.text = saved.username;
+    _passwordController.text = saved.password;
     setState(() {
-      _remember = remember;
+      _remember = saved.remember;
       _ready = true;
     });
   }
@@ -72,7 +65,11 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
         return;
       }
 
-      await _saveRememberedLogin(username, password);
+      await _storage.save(
+        username: username,
+        password: password,
+        remember: _remember,
+      );
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/home');
     } catch (e) {
@@ -84,9 +81,7 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
   }
 
   bool _validate() {
-    final usernameError = _usernameController.text.trim().isEmpty
-        ? '请输入用户名'
-        : '';
+    final usernameError = _usernameController.text.trim().isEmpty ? '请输入用户名' : '';
     final passwordError = _passwordController.text.isEmpty ? '请输入密码' : '';
     setState(() {
       _usernameError = usernameError;
@@ -95,154 +90,212 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
     return usernameError.isEmpty && passwordError.isEmpty;
   }
 
-  Future<void> _saveRememberedLogin(String username, String password) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (_remember) {
-      await prefs.setBool(_rememberKey, true);
-      await prefs.setString(_usernameKey, username);
-      await prefs.setString(_passwordKey, password);
-      return;
-    }
-
-    await prefs.setBool(_rememberKey, false);
-    await prefs.remove(_usernameKey);
-    await prefs.remove(_passwordKey);
-  }
-
   void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-
     if (!_ready) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return FScaffold(
-      child: ColoredBox(
-        color: theme.colors.muted,
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: FCard.raw(
-                  child: Padding(
-                    padding: const EdgeInsets.all(22),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const _LoginHeader(),
-                        const SizedBox(height: 24),
-                        FTextField(
-                          control: FTextFieldControl.managed(
-                            controller: _usernameController,
-                          ),
-                          label: const Text('用户名'),
-                          hint: '请输入用户名',
-                          error: _usernameError.isEmpty
-                              ? null
-                              : Text(_usernameError),
-                          textInputAction: TextInputAction.next,
-                          prefixBuilder: (fieldContext, style, variants) =>
-                              FTextField.prefixIconBuilder(
-                                fieldContext,
-                                style,
-                                variants,
-                                const Icon(FIcons.user),
-                              ),
-                          onSubmit: (_) => FocusScope.of(context).nextFocus(),
-                        ),
-                        const SizedBox(height: 14),
-                        FTextField.password(
-                          control: FTextFieldControl.managed(
-                            controller: _passwordController,
-                          ),
-                          label: const Text('密码'),
-                          hint: '请输入密码',
-                          error: _passwordError.isEmpty
-                              ? null
-                              : Text(_passwordError),
-                          textInputAction: TextInputAction.done,
-                          prefixBuilder: (fieldContext, style, _, variants) =>
-                              FTextField.prefixIconBuilder(
-                                fieldContext,
-                                style,
-                                variants,
-                                const Icon(FIcons.lock),
-                              ),
-                          onSubmit: (_) => _loading ? null : _login(),
-                        ),
-                        const SizedBox(height: 16),
-                        FCheckbox(
-                          value: _remember,
-                          onChange: (value) =>
-                              setState(() => _remember = value),
-                          label: const Text('记住密码'),
-                          description: const Text('下次打开自动回填账号和密码'),
-                        ),
-                        const SizedBox(height: 18),
-                        FButton(
-                          onPress: _loading ? null : _login,
-                          size: FButtonSizeVariant.lg,
-                          child: Text(_loading ? '登录中...' : '登录'),
-                        ),
-                      ],
-                    ),
+    return Scaffold(
+      body: Stack(
+        children: [
+          const _LoginBackground(),
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 430),
+                  child: _LoginCard(
+                    usernameController: _usernameController,
+                    passwordController: _passwordController,
+                    usernameError: _usernameError,
+                    passwordError: _passwordError,
+                    remember: _remember,
+                    loading: _loading,
+                    onRememberChanged: (value) => setState(() => _remember = value),
+                    onLogin: _login,
                   ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class _LoginHeader extends StatelessWidget {
-  const _LoginHeader();
+class _LoginBackground extends StatelessWidget {
+  const _LoginBackground();
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFFF8FAFC), Color(0xFFEFF6FF), Color(0xFFF0FDFA)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -90,
+            right: -80,
+            child: _BlurCircle(color: const Color(0x332563EB), size: 220),
+          ),
+          Positioned(
+            bottom: -70,
+            left: -70,
+            child: _BlurCircle(color: const Color(0x3314B8A6), size: 190),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.colors.primary,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(11),
-            child: Icon(
-              FIcons.smartphone,
-              color: theme.colors.primaryForeground,
+class _BlurCircle extends StatelessWidget {
+  const _BlurCircle({required this.color, required this.size});
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+    );
+  }
+}
+
+class _LoginCard extends StatelessWidget {
+  const _LoginCard({
+    required this.usernameController,
+    required this.passwordController,
+    required this.usernameError,
+    required this.passwordError,
+    required this.remember,
+    required this.loading,
+    required this.onRememberChanged,
+    required this.onLogin,
+  });
+
+  final TextEditingController usernameController;
+  final TextEditingController passwordController;
+  final String usernameError;
+  final String passwordError;
+  final bool remember;
+  final bool loading;
+  final ValueChanged<bool> onRememberChanged;
+  final VoidCallback onLogin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.94),
+      elevation: 18,
+      shadowColor: const Color(0x1F0F172A),
+      borderRadius: BorderRadius.circular(28),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const LoginHeader(),
+            const SizedBox(height: 26),
+            TextField(
+              controller: usernameController,
+              textInputAction: TextInputAction.next,
+              decoration: _fieldDecoration(
+                label: '用户名',
+                hint: '请输入用户名',
+                icon: Icons.person_outline_rounded,
+                error: usernameError,
+              ),
             ),
-          ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) {
+                if (!loading) onLogin();
+              },
+              decoration: _fieldDecoration(
+                label: '密码',
+                hint: '请输入密码',
+                icon: Icons.lock_outline_rounded,
+                error: passwordError,
+              ),
+            ),
+            const SizedBox(height: 16),
+            SwitchListTile.adaptive(
+              value: remember,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('记住密码'),
+              subtitle: const Text('下次打开自动回填账号和密码'),
+              onChanged: loading ? null : onRememberChanged,
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: loading ? null : onLogin,
+              icon: loading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.arrow_forward_rounded),
+              label: Text(loading ? '登录中...' : '登录'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 16),
-        Text(
-          'Mobile',
-          style: theme.typography.xl3.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '手机端登录',
-          style: theme.typography.sm.copyWith(
-            color: theme.colors.mutedForeground,
-          ),
-        ),
-      ],
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration({
+    required String label,
+    required String hint,
+    required IconData icon,
+    required String error,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      errorText: error.isEmpty ? null : error,
+      prefixIcon: Icon(icon),
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
     );
   }
 }
