@@ -7,7 +7,7 @@
 ```text
 .
 ├── docker-compose.yml                 # PostgreSQL + MinIO 本地开发环境
-├── main.go                            # Go 服务入口
+├── cmd/server/main.go                 # Go 服务入口
 ├── internal/
 │   ├── admin/                         # 管理端接口
 │   ├── auth/                          # 登录接口
@@ -44,7 +44,7 @@ password=admin_go_password
 后端默认会使用上面的连接。也可以通过 `DATABASE_DSN` 覆盖：
 
 ```bash
-DATABASE_DSN="host=localhost port=5432 user=admin_go password=admin_go_password dbname=flutter_admin_go sslmode=disable TimeZone=Asia/Shanghai" go run .
+DATABASE_DSN="host=localhost port=5432 user=admin_go password=admin_go_password dbname=flutter_admin_go sslmode=disable TimeZone=Asia/Shanghai" go run ./cmd/server
 ```
 
 MinIO 默认信息：
@@ -71,7 +71,7 @@ MINIO_AVATAR_BUCKET
 
 ```bash
 go mod download
-go run .
+go run ./cmd/server
 ```
 
 服务默认运行在：
@@ -175,7 +175,7 @@ docker compose logs -f postgres
 docker compose logs -f minio
 
 # 后端
-go run .
+go run ./cmd/server
 go test ./...
 
 # 管理端
