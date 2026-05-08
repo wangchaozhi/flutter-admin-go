@@ -32,13 +32,10 @@ import type {
   User,
   UserForm,
 } from './adminTypes'
-import {
-  ConfirmDialog,
-  MenuManagementSection,
-  RoleManagementSection,
-  UserManagementSection,
-  buildMenuTree,
-} from './components/AdminSections'
+import { ConfirmDialog } from './components/confirm'
+import { MenuManagementSection, buildMenuTree } from './features/menus'
+import { RoleManagementSection } from './features/roles'
+import { UserManagementSection } from './features/users'
 
 const emptyUser: UserForm = {
   username: '',
