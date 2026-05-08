@@ -14,9 +14,14 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token    string `json:"token"`
-	Username string `json:"username"`
-	Client   string `json:"client"`
+	Token        string   `json:"token"`
+	Username     string   `json:"username"`
+	Client       string   `json:"client"`
+	MenuPaths    []string `json:"menuPaths,omitempty"`
+	Permissions  []string `json:"permissions,omitempty"`
+	Theme        string   `json:"theme,omitempty"`
+	AvatarURL    string   `json:"avatarUrl,omitempty"`
+	ThumbnailURL string   `json:"thumbnailUrl,omitempty"`
 }
 
 func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +43,21 @@ func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		common.WriteJSON(w, http.StatusUnauthorized, common.APIResponse{Code: 401, Msg: "invalid credentials"})
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: LoginResponse{Token: "admin-token", Username: req.Username, Client: "admin"}})
+	profile, err := admin.BuildProfile(req.Username)
+	if err != nil {
+		common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: LoginResponse{
+		Token:        admin.BuildAdminToken(req.Username),
+		Username:     req.Username,
+		Client:       "admin",
+		MenuPaths:    profile.MenuPaths,
+		Permissions:  profile.Permissions,
+		Theme:        profile.Theme,
+		AvatarURL:    profile.AvatarURL,
+		ThumbnailURL: profile.ThumbnailURL,
+	}})
 }
 
 func MobileLoginHandler(w http.ResponseWriter, r *http.Request) {

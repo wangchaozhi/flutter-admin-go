@@ -1,5 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import {
+  BadgeCheck,
+  ChevronRight,
+  KeyRound,
+  LogOut,
+  Menu as MenuIcon,
+  Monitor,
+  Moon,
+  ImageUp,
+  PanelLeft,
+  RefreshCw,
+  Shield,
+  Sun,
+  Trash2,
+  UserCog,
+  Users,
+} from 'lucide-react'
 import './App.css'
 
 type Entity = 'users' | 'roles' | 'menus'
@@ -23,6 +40,8 @@ type Menu = {
   name: string
   path: string
   parentId: number
+  type: 'menu' | 'button'
+  permission: string
 }
 
 type ApiResponse<T> = {
@@ -35,9 +54,23 @@ type LoginResponse = {
   token: string
   username: string
   client: string
+  menuPaths?: string[]
+  permissions?: string[]
+  theme?: ThemeMode
+  avatarUrl?: string
+  thumbnailUrl?: string
 }
 
 type AdminSession = LoginResponse
+type ThemeMode = 'system' | 'light' | 'dark'
+type Profile = {
+  username: string
+  menuPaths: string[]
+  permissions: string[]
+  theme: ThemeMode
+  avatarUrl: string
+  thumbnailUrl: string
+}
 
 type UserForm = Omit<User, 'id'> & { id?: number; password: string }
 type RoleForm = Omit<Role, 'id'> & { id?: number }
@@ -60,25 +93,56 @@ const emptyMenu: MenuForm = {
   name: '',
   path: '',
   parentId: 0,
+  type: 'menu',
+  permission: '',
 }
 
-const tabs: Array<{ key: Entity; label: string }> = [
-  { key: 'users', label: '用户' },
-  { key: 'roles', label: '角色' },
-  { key: 'menus', label: '菜单' },
+const tabs: Array<{ key: Entity; label: string; icon: typeof Users }> = [
+  { key: 'users', label: '用户', icon: Users },
+  { key: 'roles', label: '角色', icon: Shield },
+  { key: 'menus', label: '菜单', icon: MenuIcon },
 ]
 
 const adminRememberKey = 'admin.remember'
 const adminUsernameKey = 'admin.username'
 const adminPasswordKey = 'admin.password'
 const adminSessionKey = 'admin.session'
+const adminThemeKey = 'admin.theme'
+const themeOrder: ThemeMode[] = ['system', 'light', 'dark']
+
+function getStoredTheme(): ThemeMode {
+  const value = localStorage.getItem(adminThemeKey)
+  return value === 'light' || value === 'dark' || value === 'system' ? value : 'system'
+}
+
+function getThemeLabel(theme: ThemeMode) {
+  if (theme === 'light') return '明亮'
+  if (theme === 'dark') return '暗色'
+  return '跟随系统'
+}
+
+function getThemeIcon(theme: ThemeMode) {
+  if (theme === 'light') return Sun
+  if (theme === 'dark') return Moon
+  return Monitor
+}
+
+function nextTheme(theme: ThemeMode): ThemeMode {
+  return themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    ...authHeaders(),
+  }
+  if (!(init?.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json'
+  }
   const res = await fetch(url, {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
+      ...headers,
+      ...(init?.headers as Record<string, string> | undefined),
     },
   })
   const body = (await res.json()) as ApiResponse<T>
@@ -88,12 +152,40 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body.data as T
 }
 
+function authHeaders(): Record<string, string> {
+  const rawSession = localStorage.getItem(adminSessionKey)
+  let session: AdminSession | null = null
+  try {
+    session = rawSession ? (JSON.parse(rawSession) as AdminSession) : null
+  } catch {
+    localStorage.removeItem(adminSessionKey)
+  }
+  const authHeaders: Record<string, string> = session?.token
+    ? { Authorization: `Bearer ${session.token}` }
+    : {}
+  return authHeaders
+}
+
+async function fetchAssetObjectURL(url: string): Promise<string> {
+  const res = await fetch(url, { headers: authHeaders() })
+  if (!res.ok) {
+    throw new Error('加载头像失败')
+  }
+  return URL.createObjectURL(await res.blob())
+}
+
 function App() {
+  const [theme, setTheme] = useState<ThemeMode>(getStoredTheme)
   const [session, setSession] = useState<AdminSession | null>(() => {
     const raw = localStorage.getItem(adminSessionKey)
     if (!raw) return null
     try {
-      return JSON.parse(raw) as AdminSession
+      const stored = JSON.parse(raw) as AdminSession
+      if (!stored.permissions || !stored.menuPaths) {
+        localStorage.removeItem(adminSessionKey)
+        return null
+      }
+      return stored
     } catch {
       localStorage.removeItem(adminSessionKey)
       return null
@@ -101,7 +193,9 @@ function App() {
   })
 
   function handleLoggedIn(nextSession: AdminSession) {
+    const nextThemeValue = nextSession.theme ?? getStoredTheme()
     localStorage.setItem(adminSessionKey, JSON.stringify(nextSession))
+    setTheme(nextThemeValue)
     setSession(nextSession)
   }
 
@@ -110,14 +204,59 @@ function App() {
     setSession(null)
   }
 
-  if (!session) {
-    return <AdminLogin onLoggedIn={handleLoggedIn} />
+  function handleThemeChange() {
+    const next = nextTheme(theme)
+    setTheme(next)
+    if (!session) return
+    const nextSession = { ...session, theme: next }
+    localStorage.setItem(adminSessionKey, JSON.stringify(nextSession))
+    setSession(nextSession)
+    void request('/api/admin/profile/theme', {
+      method: 'PUT',
+      body: JSON.stringify({ theme: next }),
+    })
   }
 
-  return <AdminDashboard session={session} onLogout={handleLogout} />
+  function handleSessionChange(nextSession: AdminSession) {
+    localStorage.setItem(adminSessionKey, JSON.stringify(nextSession))
+    setSession(nextSession)
+  }
+
+  useEffect(() => {
+    localStorage.setItem(adminThemeKey, theme)
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+
+  useEffect(() => {
+    if (session?.theme) {
+      setTheme(session.theme)
+    }
+  }, [session?.username])
+
+  if (!session) {
+    return <AdminLogin theme={theme} onThemeChange={handleThemeChange} onLoggedIn={handleLoggedIn} />
+  }
+
+  return (
+    <AdminDashboard
+      session={session}
+      theme={theme}
+      onSessionChange={handleSessionChange}
+      onThemeChange={handleThemeChange}
+      onLogout={handleLogout}
+    />
+  )
 }
 
-function AdminLogin({ onLoggedIn }: { onLoggedIn: (session: AdminSession) => void }) {
+function AdminLogin({
+  theme,
+  onThemeChange,
+  onLoggedIn,
+}: {
+  theme: ThemeMode
+  onThemeChange: () => void
+  onLoggedIn: (session: AdminSession) => void
+}) {
   const [username, setUsername] = useState(() => localStorage.getItem(adminUsernameKey) ?? 'admin')
   const [password, setPassword] = useState(() => localStorage.getItem(adminPasswordKey) ?? '')
   const [remember, setRemember] = useState(() => localStorage.getItem(adminRememberKey) === 'true')
@@ -156,11 +295,15 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (session: AdminSession) => voi
 
   return (
     <main className="login-shell">
+      <ThemeButton theme={theme} onThemeChange={onThemeChange} className="login-theme" />
       <form className="login-card" onSubmit={login}>
-        <span className="brand-mark">AG</span>
-        <div>
+        <span className="brand-mark">
+          <PanelLeft size={18} strokeWidth={2.2} />
+        </span>
+        <div className="login-heading">
           <p className="eyebrow">Admin Go</p>
           <h1>后台登录</h1>
+          <p>使用角色和按钮权限管理后台操作。</p>
         </div>
         <label>
           用户名
@@ -184,6 +327,7 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (session: AdminSession) => voi
         </label>
         {error && <span className="status error">{error}</span>}
         <button className="primary-button" disabled={loading} type="submit">
+          <KeyRound size={15} />
           {loading ? '登录中...' : '登录'}
         </button>
       </form>
@@ -193,9 +337,15 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (session: AdminSession) => voi
 
 function AdminDashboard({
   session,
+  theme,
+  onSessionChange,
+  onThemeChange,
   onLogout,
 }: {
   session: AdminSession
+  theme: ThemeMode
+  onSessionChange: (session: AdminSession) => void
+  onThemeChange: () => void
   onLogout: () => void
 }) {
   const [active, setActive] = useState<Entity>('users')
@@ -209,6 +359,7 @@ function AdminDashboard({
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('正在加载管理数据')
   const [error, setError] = useState('')
+  const [avatarPreview, setAvatarPreview] = useState('')
 
   const roleNameByID = useMemo(
     () => new Map(roles.map((role) => [role.id, role.name])),
@@ -218,7 +369,20 @@ function AdminDashboard({
     () => new Map(menus.map((menu) => [menu.id, menu.name])),
     [menus],
   )
+  const pageMenus = useMemo(() => menus.filter((menu) => menu.type !== 'button'), [menus])
+  const buttonMenus = useMemo(() => menus.filter((menu) => menu.type === 'button'), [menus])
   const menuTree = useMemo(() => buildMenuTree(menus), [menus])
+  const permissions = useMemo(() => new Set(session.permissions ?? []), [session.permissions])
+  const menuPaths = useMemo(() => new Set(session.menuPaths ?? []), [session.menuPaths])
+  const visibleTabs = useMemo(
+    () =>
+      tabs
+        .filter((tab) => tab.key !== 'users' || menuPaths.has('/system/user'))
+        .filter((tab) => tab.key !== 'roles' || menuPaths.has('/system/role'))
+        .filter((tab) => tab.key !== 'menus' || menuPaths.has('/system/menu')),
+    [menuPaths],
+  )
+  const can = (permission: string) => permissions.has(permission)
 
   async function loadAll() {
     setLoading(true)
@@ -244,6 +408,36 @@ function AdminDashboard({
   useEffect(() => {
     void loadAll()
   }, [])
+
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.some((tab) => tab.key === active)) {
+      setActive(visibleTabs[0].key)
+    }
+  }, [active, visibleTabs])
+
+  useEffect(() => {
+    if (!session.thumbnailUrl) {
+      setAvatarPreview('')
+      return
+    }
+    let revoked = false
+    void fetchAssetObjectURL(session.thumbnailUrl)
+      .then((url) => {
+        if (revoked) {
+          URL.revokeObjectURL(url)
+          return
+        }
+        setAvatarPreview(url)
+      })
+      .catch(() => setAvatarPreview(''))
+    return () => {
+      revoked = true
+      setAvatarPreview((current) => {
+        if (current) URL.revokeObjectURL(current)
+        return ''
+      })
+    }
+  }, [session.thumbnailUrl])
 
   async function saveUser(event: FormEvent) {
     event.preventDefault()
@@ -288,7 +482,11 @@ function AdminDashboard({
 
   async function saveMenu(event: FormEvent) {
     event.preventDefault()
-    if (!menuForm.name.trim() || !menuForm.path.trim()) {
+    if (
+      !menuForm.name.trim() ||
+      (menuForm.type !== 'button' && !menuForm.path.trim()) ||
+      (menuForm.type === 'button' && !menuForm.permission.trim())
+    ) {
       setError('请输入菜单名称和路径')
       return
     }
@@ -303,6 +501,8 @@ function AdminDashboard({
         name: menuForm.name.trim(),
         path: menuForm.path.trim(),
         parentId: menuForm.parentId,
+        type: menuForm.type,
+        permission: menuForm.permission.trim(),
       },
       () => setMenuForm(emptyMenu),
     )
@@ -346,27 +546,59 @@ function AdminDashboard({
     }
   }
 
+  async function uploadAvatar(file: File | undefined) {
+    if (!file) return
+    setSaving(true)
+    setError('')
+    try {
+      const form = new FormData()
+      form.append('avatar', file)
+      const profile = await request<Profile>('/api/admin/profile/avatar', {
+        method: 'POST',
+        body: form,
+      })
+      onSessionChange({
+        ...session,
+        theme: profile.theme,
+        avatarUrl: profile.avatarUrl,
+        thumbnailUrl: profile.thumbnailUrl,
+      })
+      setNotice('头像已更新')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '头像上传失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <main className="admin-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">AG</span>
+          <span className="brand-mark">
+            <PanelLeft size={18} strokeWidth={2.2} />
+          </span>
           <div>
             <strong>Admin Go</strong>
             <small>系统管理</small>
           </div>
         </div>
         <nav className="nav-tabs" aria-label="系统管理">
-          {tabs.map((tab) => (
-            <button
-              className={active === tab.key ? 'active' : ''}
-              key={tab.key}
-              type="button"
-              onClick={() => setActive(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {visibleTabs.map((tab) => {
+            const Icon = tab.icon
+            return (
+              <button
+                className={active === tab.key ? 'active' : ''}
+                key={tab.key}
+                type="button"
+                onClick={() => setActive(tab.key)}
+              >
+                <Icon size={16} />
+                <span>{tab.label}</span>
+                <ChevronRight className="nav-chevron" size={15} />
+              </button>
+            )
+          })}
         </nav>
       </aside>
 
@@ -375,13 +607,36 @@ function AdminDashboard({
           <div>
             <p className="eyebrow">权限中心</p>
             <h1>用户、菜单、角色管理</h1>
+            <p className="toolbar-subtitle">PostgreSQL + GORM 驱动的后台权限面板。</p>
           </div>
           <div className="toolbar-actions">
-            <span>{session.username}</span>
+            <span className="session-pill">
+              {avatarPreview ? (
+                <img alt={`${session.username} 头像`} src={avatarPreview} />
+              ) : (
+                <BadgeCheck size={14} />
+              )}
+              {session.username}
+            </span>
+            <label className="avatar-upload">
+              <ImageUp size={15} />
+              头像
+              <input
+                accept="image/png,image/jpeg"
+                type="file"
+                onChange={(event) => {
+                  void uploadAvatar(event.target.files?.[0])
+                  event.target.value = ''
+                }}
+              />
+            </label>
             <button className="ghost-button" type="button" onClick={loadAll}>
+              <RefreshCw size={15} />
               刷新
             </button>
+            <ThemeButton theme={theme} onThemeChange={onThemeChange} />
             <button className="ghost-button" type="button" onClick={onLogout}>
+              <LogOut size={15} />
               退出
             </button>
           </div>
@@ -437,6 +692,9 @@ function AdminDashboard({
               <FormActions
                 busy={saving}
                 editing={Boolean(userForm.id)}
+                createPermission="user:create"
+                editPermission="user:edit"
+                can={can}
                 onReset={() => setUserForm(emptyUser)}
               />
             </form>
@@ -461,6 +719,8 @@ function AdminDashboard({
                         <td>{formatNames(user.roleIds, roleNameByID)}</td>
                         <td>
                           <RowActions
+                            canEdit={can('user:edit')}
+                            canDelete={can('user:delete')}
                             onEdit={() => setUserForm({ ...user, password: '' })}
                             onDelete={() => deleteRecord('users', user.id)}
                           />
@@ -500,14 +760,24 @@ function AdminDashboard({
               </label>
               <CheckboxGroup
                 label="菜单权限"
-                items={menus}
+                items={pageMenus}
                 selected={roleForm.menuIds}
                 getLabel={(menu) => menu.name}
+                onChange={(menuIds) => setRoleForm({ ...roleForm, menuIds })}
+              />
+              <CheckboxGroup
+                label="按钮权限"
+                items={buttonMenus}
+                selected={roleForm.menuIds}
+                getLabel={(menu) => `${menu.name} (${menu.permission})`}
                 onChange={(menuIds) => setRoleForm({ ...roleForm, menuIds })}
               />
               <FormActions
                 busy={saving}
                 editing={Boolean(roleForm.id)}
+                createPermission="role:create"
+                editPermission="role:edit"
+                can={can}
                 onReset={() => setRoleForm(emptyRole)}
               />
             </form>
@@ -532,6 +802,8 @@ function AdminDashboard({
                         <td>{formatNames(role.menuIds, menuNameByID)}</td>
                         <td>
                           <RowActions
+                            canEdit={can('role:edit')}
+                            canDelete={can('role:delete')}
                             onEdit={() => setRoleForm(role)}
                             onDelete={() => deleteRecord('roles', role.id)}
                           />
@@ -550,6 +822,23 @@ function AdminDashboard({
             <form className="editor-panel" onSubmit={saveMenu}>
               <PanelTitle title={menuForm.id ? '编辑菜单' : '新增菜单'} />
               <label>
+                类型
+                <select
+                  value={menuForm.type}
+                  onChange={(event) =>
+                    setMenuForm({
+                      ...menuForm,
+                      type: event.target.value as MenuForm['type'],
+                      path: event.target.value === 'button' ? '' : menuForm.path,
+                      permission: event.target.value === 'menu' ? '' : menuForm.permission,
+                    })
+                  }
+                >
+                  <option value="menu">菜单</option>
+                  <option value="button">按钮</option>
+                </select>
+              </label>
+              <label>
                 菜单名称
                 <input
                   value={menuForm.name}
@@ -562,6 +851,7 @@ function AdminDashboard({
               <label>
                 路由路径
                 <input
+                  disabled={menuForm.type === 'button'}
                   value={menuForm.path}
                   onChange={(event) =>
                     setMenuForm({ ...menuForm, path: event.target.value })
@@ -569,6 +859,18 @@ function AdminDashboard({
                   placeholder="/system/user"
                 />
               </label>
+              {menuForm.type === 'button' && (
+                <label>
+                  权限标识
+                  <input
+                    value={menuForm.permission}
+                    onChange={(event) =>
+                      setMenuForm({ ...menuForm, permission: event.target.value })
+                    }
+                    placeholder="user:create"
+                  />
+                </label>
+              )}
               <label>
                 上级菜单
                 <select
@@ -578,7 +880,7 @@ function AdminDashboard({
                   }
                 >
                   <option value={0}>顶级菜单</option>
-                  {menus
+                  {pageMenus
                     .filter((menu) => menu.id !== menuForm.id)
                     .map((menu) => (
                       <option key={menu.id} value={menu.id}>
@@ -590,6 +892,9 @@ function AdminDashboard({
               <FormActions
                 busy={saving}
                 editing={Boolean(menuForm.id)}
+                createPermission="menu:create"
+                editPermission="menu:edit"
+                can={can}
                 onReset={() => setMenuForm(emptyMenu)}
               />
             </form>
@@ -603,6 +908,8 @@ function AdminDashboard({
                     node={node}
                     onEdit={(menu) => setMenuForm(menu)}
                     onDelete={(id) => deleteRecord('menus', id)}
+                    canEdit={can('menu:edit')}
+                    canDelete={can('menu:delete')}
                   />
                 ))}
               </div>
@@ -611,6 +918,29 @@ function AdminDashboard({
         )}
       </section>
     </main>
+  )
+}
+
+function ThemeButton({
+  theme,
+  onThemeChange,
+  className = '',
+}: {
+  theme: ThemeMode
+  onThemeChange: () => void
+  className?: string
+}) {
+  const Icon = getThemeIcon(theme)
+  return (
+    <button
+      className={`ghost-button theme-button ${className}`.trim()}
+      type="button"
+      title={`主题：${getThemeLabel(theme)}`}
+      onClick={onThemeChange}
+    >
+      <Icon size={15} />
+      <span>{getThemeLabel(theme)}</span>
+    </button>
   )
 }
 
@@ -626,17 +956,27 @@ function PanelTitle({ title, count }: { title: string; count?: number }) {
 function FormActions({
   busy,
   editing,
+  createPermission,
+  editPermission,
+  can,
   onReset,
 }: {
   busy: boolean
   editing: boolean
+  createPermission: string
+  editPermission: string
+  can: (permission: string) => boolean
   onReset: () => void
 }) {
+  const allowed = editing ? can(editPermission) : can(createPermission)
   return (
     <div className="form-actions">
-      <button className="primary-button" disabled={busy} type="submit">
-        {editing ? '保存' : '新增'}
-      </button>
+      {allowed && (
+        <button className="primary-button" disabled={busy} type="submit">
+          <BadgeCheck size={15} />
+          {editing ? '保存' : '新增'}
+        </button>
+      )}
       <button className="ghost-button" type="button" onClick={onReset}>
         重置
       </button>
@@ -645,20 +985,31 @@ function FormActions({
 }
 
 function RowActions({
+  canEdit,
+  canDelete,
   onEdit,
   onDelete,
 }: {
+  canEdit: boolean
+  canDelete: boolean
   onEdit: () => void
   onDelete: () => void
 }) {
   return (
     <div className="row-actions">
-      <button type="button" onClick={onEdit}>
-        编辑
-      </button>
-      <button className="danger" type="button" onClick={onDelete}>
-        删除
-      </button>
+      {canEdit && (
+        <button type="button" onClick={onEdit}>
+          <UserCog size={14} />
+          编辑
+        </button>
+      )}
+      {canDelete && (
+        <button className="danger" type="button" onClick={onDelete}>
+          <Trash2 size={14} />
+          删除
+        </button>
+      )}
+      {!canEdit && !canDelete && <span className="muted-action">无权限</span>}
     </div>
   )
 }
@@ -706,24 +1057,40 @@ function MenuNode({
   node,
   onEdit,
   onDelete,
+  canEdit,
+  canDelete,
 }: {
   node: MenuNodeType
   onEdit: (menu: Menu) => void
   onDelete: (id: number) => void
+  canEdit: boolean
+  canDelete: boolean
 }) {
   return (
     <div className="menu-node">
       <div className="menu-node-row">
         <div>
           <strong>{node.name}</strong>
-          <span>{node.path}</span>
+          <span>{node.type === 'button' ? node.permission : node.path}</span>
         </div>
-        <RowActions onEdit={() => onEdit(node)} onDelete={() => onDelete(node.id)} />
+        <RowActions
+          canEdit={canEdit}
+          canDelete={canDelete}
+          onEdit={() => onEdit(node)}
+          onDelete={() => onDelete(node.id)}
+        />
       </div>
       {node.children.length > 0 && (
         <div className="menu-children">
           {node.children.map((child) => (
-            <MenuNode key={child.id} node={child} onEdit={onEdit} onDelete={onDelete} />
+            <MenuNode
+              key={child.id}
+              node={child}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              canEdit={canEdit}
+              canDelete={canDelete}
+            />
           ))}
         </div>
       )}

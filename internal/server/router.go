@@ -14,6 +14,10 @@ func NewRouter() http.Handler {
 	mux.HandleFunc("/api/admin/login", auth.AdminLoginHandler)
 	mux.HandleFunc("/api/mobile/login", auth.MobileLoginHandler)
 
+	mux.HandleFunc("/api/admin/profile", admin.ProfileHandler)
+	mux.HandleFunc("/api/admin/profile/theme", admin.ProfileThemeHandler)
+	mux.HandleFunc("/api/admin/profile/avatar", admin.ProfileAvatarHandler)
+	mux.HandleFunc("/api/admin/profile/assets/", admin.ProfileAssetHandler)
 	mux.HandleFunc("/api/admin/users", admin.UsersHandler)
 	mux.HandleFunc("/api/admin/users/", admin.UserByIDHandler)
 	mux.HandleFunc("/api/admin/roles", admin.RolesHandler)

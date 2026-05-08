@@ -1,13 +1,25 @@
 :root {
   font-family:
-    'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     sans-serif;
-  color: #172033;
-  background: #f6f7f9;
+  color: #111;
+  background: #fafafa;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme='dark'] {
+  color: #ededed;
+  background: #050505;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    color: #ededed;
+    background: #050505;
+  }
 }
 
 * {

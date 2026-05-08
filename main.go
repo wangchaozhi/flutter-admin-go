@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	if err := store.Init("data/app.db"); err != nil {
+	if err := store.Init(""); err != nil {
 		log.Fatal(err)
 	}
 
