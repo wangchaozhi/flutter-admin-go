@@ -360,6 +360,7 @@ function AdminDashboard({
   const [notice, setNotice] = useState('正在加载管理数据')
   const [error, setError] = useState('')
   const [avatarPreview, setAvatarPreview] = useState('')
+  const [avatarRefreshKey, setAvatarRefreshKey] = useState(0)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -444,7 +445,9 @@ function AdminDashboard({
       return
     }
     let revoked = false
-    void fetchAssetObjectURL(session.thumbnailUrl)
+    const separator = session.thumbnailUrl.includes('?') ? '&' : '?'
+    const thumbnailUrl = `${session.thumbnailUrl}${separator}v=${avatarRefreshKey}`
+    void fetchAssetObjectURL(thumbnailUrl)
       .then((url) => {
         if (revoked) {
           URL.revokeObjectURL(url)
@@ -460,7 +463,7 @@ function AdminDashboard({
         return ''
       })
     }
-  }, [session.thumbnailUrl])
+  }, [avatarRefreshKey, session.thumbnailUrl])
 
   async function saveUser(event: FormEvent) {
     event.preventDefault()
@@ -587,6 +590,7 @@ function AdminDashboard({
         avatarUrl: profile.avatarUrl,
         thumbnailUrl: profile.thumbnailUrl,
       })
+      setAvatarRefreshKey(Date.now())
       setNotice('头像已更新')
     } catch (err) {
       setError(err instanceof Error ? err.message : '头像上传失败')
