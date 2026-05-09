@@ -6,10 +6,11 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
+
+	"flutter-admin-go/internal/config"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -17,13 +18,6 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
-
-const defaultDSN = "host=localhost port=5432 user=admin_go password=admin_go_password dbname=flutter_admin_go sslmode=disable TimeZone=Asia/Shanghai"
-const defaultMinIOEndpoint = "localhost:9000"
-const defaultMinIOAccessKey = "admin_go"
-const defaultMinIOSecretKey = "admin_go_password"
-const defaultAvatarBucket = "admin-avatars"
-const defaultRedisAddr = "localhost:6379"
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
@@ -214,13 +208,8 @@ func (AppSetting) TableName() string {
 	return "app_settings"
 }
 
-func Init(_ string) error {
-	dsn := strings.TrimSpace(os.Getenv("DATABASE_DSN"))
-	if dsn == "" {
-		dsn = defaultDSN
-	}
-
-	conn, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+func Init(cfg *config.Config) error {
+	conn, err := gorm.Open(postgres.Open(cfg.Database.DSN), &gorm.Config{})
 	if err != nil {
 		return fmt.Errorf("open postgres: %w", err)
 	}
@@ -238,10 +227,10 @@ func Init(_ string) error {
 	if err = migrate(); err != nil {
 		return err
 	}
-	if err = initObjectStore(); err != nil {
+	if err = initObjectStore(cfg.MinIO); err != nil {
 		return err
 	}
-	if err = initRedis(); err != nil {
+	if err = initRedis(cfg.Redis); err != nil {
 		return err
 	}
 	return nil
@@ -263,10 +252,8 @@ func Redis() *redis.Client {
 	return redisClient
 }
 
-func initRedis() error {
-	addr := envOrDefault("REDIS_ADDR", defaultRedisAddr)
-	password := strings.TrimSpace(os.Getenv("REDIS_PASSWORD"))
-	client := redis.NewClient(&redis.Options{Addr: addr, Password: password})
+func initRedis(cfg config.RedisConfig) error {
+	client := redis.NewClient(&redis.Options{Addr: cfg.Addr, Password: cfg.Password})
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		return fmt.Errorf("ping redis: %w", err)
 	}
@@ -274,16 +261,11 @@ func initRedis() error {
 	return nil
 }
 
-func initObjectStore() error {
-	endpoint := envOrDefault("MINIO_ENDPOINT", defaultMinIOEndpoint)
-	accessKey := envOrDefault("MINIO_ACCESS_KEY", defaultMinIOAccessKey)
-	secretKey := envOrDefault("MINIO_SECRET_KEY", defaultMinIOSecretKey)
-	avatarBucket = envOrDefault("MINIO_AVATAR_BUCKET", defaultAvatarBucket)
-	useSSL := strings.EqualFold(os.Getenv("MINIO_USE_SSL"), "true")
-
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: useSSL,
+func initObjectStore(cfg config.MinIOConfig) error {
+	avatarBucket = cfg.AvatarBucket
+	client, err := minio.New(cfg.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+		Secure: cfg.UseSSL,
 	})
 	if err != nil {
 		return fmt.Errorf("create minio client: %w", err)
@@ -301,14 +283,6 @@ func initObjectStore() error {
 	}
 	objectClient = client
 	return nil
-}
-
-func envOrDefault(key, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return fallback
-	}
-	return value
 }
 
 func migrate() error {

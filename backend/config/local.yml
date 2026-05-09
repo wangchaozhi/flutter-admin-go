@@ -1,0 +1,16 @@
+server:
+  addr: ":8080"
+
+database:
+  dsn: "host=localhost port=5432 user=admin_go password=admin_go_password dbname=flutter_admin_go sslmode=disable TimeZone=Asia/Shanghai"
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+
+minio:
+  endpoint: "localhost:9000"
+  access_key: "admin_go"
+  secret_key: "admin_go_password"
+  avatar_bucket: "admin-avatars"
+  use_ssl: false
