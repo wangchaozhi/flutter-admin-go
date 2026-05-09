@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Go: Run Server (local)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/backend/cmd/server/main.go",
+      "cwd": "${workspaceFolder}/backend",
+      "args": ["-config", "config/local.yml"]
+    },
+    {
+      "name": "Go: Run Server (dev 192.168.1.15)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/backend/cmd/server/main.go",
+      "cwd": "${workspaceFolder}/backend",
+      "args": ["-config", "config/dev.yml"]
+    }
+  ]
+}
