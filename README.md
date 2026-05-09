@@ -236,3 +236,7 @@ cd front/mobile
 flutter run
 flutter build apk
 ```
+
+## 协作说明
+
+本项目由 wangchaozhi 维护，Codex 作为 AI 编程协作者参与代码实现、文档更新与问题排查。
