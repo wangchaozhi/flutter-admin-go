@@ -64,6 +64,7 @@ func ChatWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	channelName := chatChannel(match.ID)
 	pubsub := store.Redis().Subscribe(ctx, channelName)
 	defer pubsub.Close()
+	_ = markMatchRead(match.ID, user.ID)
 
 	go func() {
 		ch := pubsub.Channel()
@@ -79,6 +80,9 @@ func ChatWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 				Text:      published.Text,
 				Mine:      published.SenderID == user.ID,
 				CreatedAt: published.CreatedAt.Format(time.RFC3339),
+			}
+			if !out.Mine {
+				_ = markMatchRead(match.ID, user.ID)
 			}
 			if err := conn.WriteJSON(out); err != nil {
 				cancel()

@@ -1,6 +1,6 @@
 import { CheckCircle2, MessageSquareText, RefreshCw, UserRoundCheck, XCircle } from 'lucide-react'
 
-import type { DatingMatch, DatingMessage, DatingPhoto, DatingUser } from '../../adminTypes'
+import type { DatingMatch, DatingMessage, DatingPhoto, DatingSettings, DatingUser } from '../../adminTypes'
 import { PanelTitle } from '../../components/shared'
 
 const statusLabel: Record<DatingPhoto['status'], string> = {
@@ -14,22 +14,26 @@ export function DatingOperationsSection({
   photos,
   matches,
   messages,
+  settings,
   saving,
   canReview,
   selectedMatchId,
   onRefresh,
   onReviewPhoto,
+  onSettingsChange,
   onSelectMatch,
 }: {
   users: DatingUser[]
   photos: DatingPhoto[]
   matches: DatingMatch[]
   messages: DatingMessage[]
+  settings: DatingSettings
   saving: boolean
   canReview: boolean
   selectedMatchId: number | null
   onRefresh: () => void
   onReviewPhoto: (id: number, status: DatingPhoto['status']) => void
+  onSettingsChange: (settings: DatingSettings) => void
   onSelectMatch: (id: number) => void
 }) {
   const pendingPhotos = photos.filter((photo) => photo.status === 'pending')
@@ -78,6 +82,18 @@ export function DatingOperationsSection({
 
       <section className="editor-panel">
         <PanelTitle title="照片审核" count={pendingPhotos.length} />
+        <label className="setting-row">
+          <span>
+            <strong>开启头像审核</strong>
+            <small>{settings.photoReviewEnabled ? '新上传头像需要审核后展示认证' : '新上传头像将直接通过认证'}</small>
+          </span>
+          <input
+            checked={settings.photoReviewEnabled}
+            disabled={saving || !canReview}
+            type="checkbox"
+            onChange={(event) => onSettingsChange({ photoReviewEnabled: event.target.checked })}
+          />
+        </label>
         <button className="ghost-button" type="button" onClick={onRefresh}>
           <RefreshCw size={15} />
           刷新运营数据
@@ -158,4 +174,3 @@ function SummaryItem({
     </div>
   )
 }
-

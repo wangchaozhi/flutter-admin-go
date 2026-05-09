@@ -10,6 +10,7 @@ import (
 
 	"flutter-admin-go/internal/common"
 	"flutter-admin-go/internal/store"
+	"gorm.io/gorm/clause"
 )
 
 type DatingUser struct {
@@ -57,6 +58,14 @@ type DatingMessage struct {
 
 type reviewPayload struct {
 	Status string `json:"status"`
+}
+
+type DatingSettings struct {
+	PhotoReviewEnabled bool `json:"photoReviewEnabled"`
+}
+
+type datingSettingsPayload struct {
+	PhotoReviewEnabled bool `json:"photoReviewEnabled"`
 }
 
 func DatingUsersHandler(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +197,49 @@ func DatingMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: result})
+}
+
+func DatingSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if !authorize(w, r, "") {
+			return
+		}
+		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: loadDatingSettings()})
+	case http.MethodPut:
+		if !authorize(w, r, "dating:review") {
+			return
+		}
+		var req datingSettingsPayload
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid body"})
+			return
+		}
+		value := "false"
+		if req.PhotoReviewEnabled {
+			value = "true"
+		}
+		record := store.AppSetting{Key: "dating.photo_review_enabled", Value: value, UpdatedAt: time.Now()}
+		if err := store.DB().Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"value", "updated_at"}),
+		}).Create(&record).Error; err != nil {
+			common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: err.Error()})
+			return
+		}
+		invalidateDatingCache()
+		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: loadDatingSettings()})
+	default:
+		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
+	}
+}
+
+func loadDatingSettings() DatingSettings {
+	var setting store.AppSetting
+	if err := store.DB().Where("key = ?", "dating.photo_review_enabled").First(&setting).Error; err != nil {
+		return DatingSettings{PhotoReviewEnabled: true}
+	}
+	return DatingSettings{PhotoReviewEnabled: strings.ToLower(strings.TrimSpace(setting.Value)) != "false"}
 }
 
 func datingUserDTO(profile store.MobileProfile) (DatingUser, error) {

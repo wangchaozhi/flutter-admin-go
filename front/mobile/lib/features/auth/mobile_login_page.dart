@@ -66,7 +66,7 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
       );
       if (!mounted) return;
       if (resp['code'] != 0) {
-        _showMessage(resp['msg']?.toString() ?? '登录失败');
+        _showMessage(resp['msg']?.toString() ?? '账号或密码不正确');
         return;
       }
       final data = resp['data'] as Map<String, dynamic>? ?? {};
@@ -121,7 +121,7 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 430),
                 child: _LoginCard(
@@ -175,18 +175,18 @@ class _LoginCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.96),
-      elevation: 18,
+      color: Colors.white.withValues(alpha: 0.98),
+      elevation: 14,
       shadowColor: const Color(0x1F0F172A),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const LoginHeader(),
-            const SizedBox(height: 26),
+            const SizedBox(height: 28),
             SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(value: false, label: Text('登录')),
@@ -197,19 +197,19 @@ class _LoginCard extends StatelessWidget {
                   ? null
                   : (values) => onModeChanged(values.first),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 22),
             TextField(
               controller: usernameController,
               keyboardType: TextInputType.phone,
               textInputAction: TextInputAction.next,
               decoration: _fieldDecoration(
                 label: '手机号',
-                hint: '请输入手机号',
+                hint: '请输入常用手机号',
                 icon: Icons.phone_iphone_rounded,
                 error: usernameError,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             TextField(
               controller: passwordController,
               obscureText: true,
@@ -218,21 +218,22 @@ class _LoginCard extends StatelessWidget {
                 if (!loading) onLogin();
               },
               decoration: _fieldDecoration(
-                label: '密码',
-                hint: '请输入密码',
+                label: '登录密码',
+                hint: '请输入登录密码',
                 icon: Icons.lock_outline_rounded,
                 error: passwordError,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             SwitchListTile.adaptive(
               value: remember,
               contentPadding: EdgeInsets.zero,
-              title: const Text('记住登录信息'),
-              subtitle: const Text('下次打开自动回填账号和密码'),
+              dense: true,
+              title: const Text('记住手机号'),
+              subtitle: const Text('下次打开时自动填入账号'),
               onChanged: loading ? null : onRememberChanged,
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: loading ? null : onLogin,
               icon: loading
@@ -242,9 +243,15 @@ class _LoginCard extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.arrow_forward_rounded),
-              label: Text(loading ? '处理中...' : (registerMode ? '注册并进入' : '登录')),
+              label: Text(
+                loading ? '正在进入...' : (registerMode ? '创建账号' : '登录并进入'),
+              ),
               style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
+                minimumSize: const Size.fromHeight(54),
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -269,6 +276,7 @@ class _LoginCard extends StatelessWidget {
       prefixIcon: Icon(icon),
       filled: true,
       fillColor: const Color(0xFFFAF7F5),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: Color(0xFFE7E2DE)),

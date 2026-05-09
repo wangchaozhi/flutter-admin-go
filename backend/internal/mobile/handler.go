@@ -85,10 +85,11 @@ type candidateDTO struct {
 }
 
 type matchDTO struct {
-	ID        int          `json:"id"`
-	Candidate candidateDTO `json:"candidate"`
-	Messages  []messageDTO `json:"messages,omitempty"`
-	CreatedAt string       `json:"createdAt"`
+	ID          int          `json:"id"`
+	Candidate   candidateDTO `json:"candidate"`
+	Messages    []messageDTO `json:"messages,omitempty"`
+	UnreadCount int          `json:"unreadCount"`
+	CreatedAt   string       `json:"createdAt"`
 }
 
 type messageDTO struct {
@@ -192,7 +193,11 @@ func PhotosHandler(w http.ResponseWriter, r *http.Request) {
 	if label == "" {
 		label = "新照片"
 	}
-	photo := store.MobilePhoto{UserID: user.ID, Label: label, Status: "pending"}
+	status := "pending"
+	if !photoReviewEnabled() {
+		status = "approved"
+	}
+	photo := store.MobilePhoto{UserID: user.ID, Label: label, Status: status}
 	if err := store.DB().Create(&photo).Error; err != nil {
 		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: err.Error()})
 		return
@@ -217,7 +222,13 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 	if raw, err := store.Redis().Get(context.Background(), cacheKey).Result(); err == nil && raw != "" {
 		var cached []candidateDTO
 		if json.Unmarshal([]byte(raw), &cached) == nil {
-			common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: cached})
+			filtered := make([]candidateDTO, 0, len(cached))
+			for _, candidate := range cached {
+				if candidate.UserID != user.ID {
+					filtered = append(filtered, candidate)
+				}
+			}
+			common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: filtered})
 			return
 		}
 	}
@@ -370,6 +381,9 @@ func ChatMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		messages, err := listMessages(match.ID, user.ID)
+		if err == nil {
+			err = markMatchRead(match.ID, user.ID)
+		}
 		writeResult(w, messages, err)
 	case http.MethodPost:
 		var req messagePayload
@@ -500,7 +514,11 @@ func buildMatchDTO(viewerID int, match store.MobileMatch) (matchDTO, error) {
 	if err != nil {
 		return matchDTO{}, err
 	}
-	return matchDTO{ID: match.ID, Candidate: candidate, Messages: messages, CreatedAt: match.CreatedAt.Format(time.RFC3339)}, nil
+	unread, err := unreadMessageCount(match.ID, viewerID)
+	if err != nil {
+		return matchDTO{}, err
+	}
+	return matchDTO{ID: match.ID, Candidate: candidate, Messages: messages, UnreadCount: unread, CreatedAt: match.CreatedAt.Format(time.RFC3339)}, nil
 }
 
 func listMessages(matchID, viewerID int) ([]messageDTO, error) {
@@ -516,6 +534,36 @@ func listMessages(matchID, viewerID int) ([]messageDTO, error) {
 		})
 	}
 	return result, nil
+}
+
+func unreadMessageCount(matchID, viewerID int) (int, error) {
+	var count int64
+	query := store.DB().Model(&store.MobileMessage{}).
+		Where("match_id = ? AND sender_id <> ?", matchID, viewerID).
+		Where(`created_at > COALESCE(
+			(SELECT last_read_at FROM mobile_message_reads WHERE match_id = ? AND user_id = ?),
+			to_timestamp(0)
+		)`, matchID, viewerID)
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func markMatchRead(matchID, userID int) error {
+	record := store.MobileMessageRead{MatchID: matchID, UserID: userID, LastReadAt: time.Now()}
+	return store.DB().Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "match_id"}, {Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"last_read_at"}),
+	}).Create(&record).Error
+}
+
+func photoReviewEnabled() bool {
+	var setting store.AppSetting
+	if err := store.DB().Where("key = ?", "dating.photo_review_enabled").First(&setting).Error; err != nil {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(setting.Value)) != "false"
 }
 
 func requireMatchMember(w http.ResponseWriter, matchID, userID int) (store.MobileMatch, bool) {

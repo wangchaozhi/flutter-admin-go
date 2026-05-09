@@ -437,6 +437,31 @@ td small,
   gap: 10px;
 }
 
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-muted);
+}
+
+.setting-row span {
+  display: grid;
+  gap: 4px;
+}
+
+.setting-row small {
+  color: var(--text-subtle);
+}
+
+.setting-row input {
+  width: 18px;
+  height: 18px;
+}
+
 .review-card {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);

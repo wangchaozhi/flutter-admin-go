@@ -10,7 +10,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.text('心遇婚恋'), findsOneWidget);
-    expect(find.text('记住登录信息'), findsOneWidget);
+    expect(find.text('欢迎回来'), findsOneWidget);
+    expect(find.text('记住手机号'), findsOneWidget);
   });
 }

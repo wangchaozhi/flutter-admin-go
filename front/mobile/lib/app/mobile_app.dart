@@ -12,7 +12,7 @@ class MobileApp extends StatelessWidget {
     final foruiTheme = FThemes.zinc.light.touch;
 
     return MaterialApp(
-      title: '心遇',
+      title: '心遇婚恋',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: FLocalizations.localizationsDelegates,
       supportedLocales: FLocalizations.supportedLocales,

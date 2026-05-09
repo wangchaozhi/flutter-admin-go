@@ -103,3 +103,7 @@ export type DatingMessage = {
   content: string
   createdAt: string
 }
+
+export type DatingSettings = {
+  photoReviewEnabled: boolean
+}

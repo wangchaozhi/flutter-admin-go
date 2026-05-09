@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../core/api_client.dart';
@@ -16,18 +15,20 @@ class MobileHomePage extends StatefulWidget {
 }
 
 class _MobileHomePageState extends State<MobileHomePage> {
-  static const _stateKey = 'dating.home.state.v1';
-
   int _tabIndex = 0;
   bool _loading = true;
-  bool _usingApi = false;
+  bool _usingApi = true;
   String _token = '';
-  DatingProfile _profile = DatingProfile.demo();
-  final List<Candidate> _candidates = Candidate.demoList();
+  String _loadError = '';
+  DatingProfile _profile = DatingProfile.empty();
+  final List<Candidate> _candidates = [];
   final Set<int> _likedIds = {};
   final Set<int> _skippedIds = {};
   final List<MatchChat> _matches = [];
   RecommendationFilter _filter = const RecommendationFilter();
+
+  int get _totalUnreadCount =>
+      _matches.fold(0, (total, match) => total + match.unreadCount);
 
   @override
   void initState() {
@@ -46,54 +47,22 @@ class _MobileHomePageState extends State<MobileHomePage> {
 
   Future<void> _loadState() async {
     _token = await LoginStorage().loadToken();
-    if (_token.isNotEmpty) {
-      try {
-        await _loadRemoteState();
-        return;
-      } catch (_) {
-        _usingApi = false;
-      }
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_stateKey);
-    if (raw == null) {
-      if (mounted) setState(() => _loading = false);
-      return;
-    }
-
-    try {
-      final data = jsonDecode(raw) as Map<String, dynamic>;
-      final likedIds = (data['likedIds'] as List<dynamic>? ?? []).cast<int>();
-      final skippedIds = (data['skippedIds'] as List<dynamic>? ?? [])
-          .cast<int>();
-      final matches = (data['matches'] as List<dynamic>? ?? [])
-          .cast<Map<String, dynamic>>()
-          .map((item) => MatchChat.fromJson(item, _candidates))
-          .whereType<MatchChat>()
-          .toList();
-
+    if (_token.isEmpty) {
       if (!mounted) return;
       setState(() {
-        _profile = DatingProfile.fromJson(
-          data['profile'] as Map<String, dynamic>?,
-        );
-        _likedIds
-          ..clear()
-          ..addAll(likedIds);
-        _skippedIds
-          ..clear()
-          ..addAll(skippedIds);
-        _matches
-          ..clear()
-          ..addAll(matches);
-        _filter = RecommendationFilter.fromJson(
-          data['filter'] as Map<String, dynamic>?,
-        );
         _loading = false;
+        _loadError = '请先登录账号，再查看推荐与消息';
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      await _loadRemoteState();
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = '暂时无法连接服务：$err';
+      });
     }
   }
 
@@ -131,53 +100,32 @@ class _MobileHomePageState extends State<MobileHomePage> {
         );
       _usingApi = true;
       _loading = false;
+      _loadError = '';
     });
-  }
-
-  Future<void> _saveState() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _stateKey,
-      jsonEncode({
-        'profile': _profile.toJson(),
-        'likedIds': _likedIds.toList(),
-        'skippedIds': _skippedIds.toList(),
-        'matches': _matches.map((match) => match.toJson()).toList(),
-        'filter': _filter.toJson(),
-      }),
-    );
   }
 
   void _like(Candidate candidate) async {
     if (_likedIds.contains(candidate.id)) return;
-    if (_usingApi) {
-      final resp = await ApiClient().post('/api/mobile/likes', {
-        'targetUserId': candidate.id,
-      }, token: _token);
-      final data = resp['data'] as Map<String, dynamic>? ?? {};
-      final matchData = data['match'] as Map<String, dynamic>?;
-      if (matchData != null) {
-        final match = MatchChat.fromJson(matchData, _candidates);
-        if (match != null && !_matches.any((item) => item.id == match.id)) {
-          setState(() => _matches.add(match));
-        }
+    final resp = await ApiClient().post('/api/mobile/likes', {
+      'targetUserId': candidate.id,
+    }, token: _token);
+    final data = resp['data'] as Map<String, dynamic>? ?? {};
+    final matchData = data['match'] as Map<String, dynamic>?;
+    if (matchData != null) {
+      final match = MatchChat.fromJson(matchData, _candidates);
+      if (match != null && !_matches.any((item) => item.id == match.id)) {
+        setState(() => _matches.add(match));
       }
     }
     setState(() {
       _likedIds.add(candidate.id);
-      if (!_usingApi &&
-          candidate.likesMe &&
-          !_matches.any((match) => match.candidate.id == candidate.id)) {
-        _matches.add(MatchChat(id: candidate.id, candidate: candidate));
-      }
     });
-    _saveState();
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          candidate.likesMe ? '匹配成功，已开启聊天' : '已喜欢 ${candidate.name}',
+          candidate.likesMe ? '你们已互相喜欢，可以开始聊天了' : '已向 ${candidate.name} 表达喜欢',
         ),
         behavior: SnackBarBehavior.floating,
       ),
@@ -185,31 +133,25 @@ class _MobileHomePageState extends State<MobileHomePage> {
   }
 
   void _skip(Candidate candidate) async {
-    if (_usingApi) {
-      await ApiClient().post('/api/mobile/passes', {
-        'targetUserId': candidate.id,
-      }, token: _token);
-    }
+    await ApiClient().post('/api/mobile/passes', {
+      'targetUserId': candidate.id,
+    }, token: _token);
     setState(() => _skippedIds.add(candidate.id));
-    _saveState();
   }
 
   void _saveProfile(DatingProfile profile) async {
-    if (_usingApi) {
-      final resp = await ApiClient().put(
-        '/api/mobile/profile',
-        profile.toJson()..remove('photos'),
-        token: _token,
-      );
-      final data = resp['data'] as Map<String, dynamic>? ?? {};
-      profile = DatingProfile.fromJson(data);
-    }
+    final resp = await ApiClient().put(
+      '/api/mobile/profile',
+      profile.toJson()..remove('photos'),
+      token: _token,
+    );
+    final data = resp['data'] as Map<String, dynamic>? ?? {};
+    profile = DatingProfile.fromJson(data);
     if (!mounted) return;
     setState(() => _profile = profile);
-    _saveState();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('资料已保存'),
+        content: Text('资料已保存，推荐会随资料更新'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -217,42 +159,19 @@ class _MobileHomePageState extends State<MobileHomePage> {
 
   void _addPhoto() async {
     final nextIndex = _profile.photos.length + 1;
-    if (_usingApi) {
-      final resp = await ApiClient().post('/api/mobile/photos', {
-        'label': '新照片 $nextIndex',
-      }, token: _token);
-      final data = resp['data'] as Map<String, dynamic>? ?? {};
-      setState(() {
-        _profile = _profile.copyWith(
-          photos: [..._profile.photos, ProfilePhoto.fromJson(data)],
-        );
-      });
-      return;
-    }
+    final resp = await ApiClient().post('/api/mobile/photos', {
+      'label': '个人照片 $nextIndex',
+    }, token: _token);
+    final data = resp['data'] as Map<String, dynamic>? ?? {};
     setState(() {
       _profile = _profile.copyWith(
-        photos: [
-          ..._profile.photos,
-          ProfilePhoto(
-            id: 'photo-$nextIndex',
-            label: '新照片 $nextIndex',
-            status: PhotoStatus.pending,
-          ),
-        ],
+        photos: [..._profile.photos, ProfilePhoto.fromJson(data)],
       );
     });
-    _saveState();
-  }
-
-  void _markFirstPhotoApproved() {
-    if (_profile.photos.isEmpty) return;
-    final photos = [..._profile.photos];
-    photos[0] = photos[0].copyWith(status: PhotoStatus.approved);
-    setState(() => _profile = _profile.copyWith(photos: photos));
-    _saveState();
   }
 
   void _openChat(MatchChat match) async {
+    setState(() => match.unreadCount = 0);
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) =>
@@ -260,7 +179,23 @@ class _MobileHomePageState extends State<MobileHomePage> {
       ),
     );
     setState(() {});
-    _saveState();
+  }
+
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('个人资料')),
+          body: SafeArea(
+            child: ProfilePage(
+              profile: _profile,
+              onSave: _saveProfile,
+              onAddPhoto: _addPhoto,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _openFilters() {
@@ -278,13 +213,13 @@ class _MobileHomePageState extends State<MobileHomePage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    '推荐筛选',
+                    '筛选推荐',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
                     initialValue: draft.city,
-                    decoration: const InputDecoration(labelText: '城市'),
+                    decoration: const InputDecoration(labelText: '所在城市'),
                     items: const ['全部', '上海', '杭州', '苏州', '南京']
                         .map(
                           (city) =>
@@ -296,7 +231,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text('最低匹配度：${draft.minScore}%'),
+                  Text('最低匹配度 ${draft.minScore}%'),
                   Slider(
                     value: draft.minScore.toDouble(),
                     min: 0,
@@ -310,7 +245,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
                   SwitchListTile.adaptive(
                     value: draft.verifiedOnly,
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('只看已认证'),
+                    title: const Text('只看已认证用户'),
                     onChanged: (value) => setSheetState(
                       () => draft = draft.copyWith(verifiedOnly: value),
                     ),
@@ -319,14 +254,11 @@ class _MobileHomePageState extends State<MobileHomePage> {
                   FilledButton.icon(
                     onPressed: () {
                       setState(() => _filter = draft);
-                      _saveState();
-                      if (_usingApi) {
-                        _loadRemoteState();
-                      }
+                      _loadRemoteState();
                       Navigator.pop(context);
                     },
                     icon: const Icon(Icons.check_rounded),
-                    label: const Text('应用筛选'),
+                    label: const Text('查看结果'),
                   ),
                 ],
               ),
@@ -347,6 +279,41 @@ class _MobileHomePageState extends State<MobileHomePage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    if (_loadError.isNotEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('心遇')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.cloud_off_rounded,
+                  size: 42,
+                  color: Color(0xFFE85D75),
+                ),
+                const SizedBox(height: 12),
+                Text(_loadError, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _loading = true;
+                      _loadError = '';
+                    });
+                    _loadState();
+                  },
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('重新加载'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     final pages = [
       RecommendPage(
         candidates: _visibleCandidates,
@@ -356,12 +323,6 @@ class _MobileHomePageState extends State<MobileHomePage> {
         onSkip: _skip,
         onOpenFilters: _openFilters,
       ),
-      ProfilePage(
-        profile: _profile,
-        onSave: _saveProfile,
-        onAddPhoto: _addPhoto,
-        onMockApprovePhoto: _markFirstPhotoApproved,
-      ),
       MatchPage(matches: _matches, onOpenChat: _openChat),
       ChatListPage(matches: _matches, onOpenChat: _openChat),
     ];
@@ -370,10 +331,49 @@ class _MobileHomePageState extends State<MobileHomePage> {
       appBar: AppBar(
         title: const Text('心遇'),
         actions: [
-          IconButton(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: '退出登录',
+          PopupMenuButton<String>(
+            tooltip: '我的',
+            onSelected: (value) {
+              if (value == 'profile') {
+                _openProfile();
+              } else if (value == 'logout') {
+                _logout();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'profile',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.badge_rounded),
+                  title: Text('个人资料'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'logout',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.logout_rounded),
+                  title: Text('退出登录'),
+                ),
+              ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFE85D75),
+                child: Text(
+                  _profile.name.isNotEmpty
+                      ? _profile.name.characters.first
+                      : '我',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -381,26 +381,27 @@ class _MobileHomePageState extends State<MobileHomePage> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
         onDestinationSelected: (index) => setState(() => _tabIndex = index),
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.favorite_border_rounded),
             selectedIcon: Icon(Icons.favorite_rounded),
             label: '推荐',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.badge_outlined),
-            selectedIcon: Icon(Icons.badge_rounded),
-            label: '资料',
-          ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.group_outlined),
             selectedIcon: Icon(Icons.group_rounded),
             label: '匹配',
           ),
           NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline_rounded),
-            selectedIcon: Icon(Icons.chat_bubble_rounded),
-            label: '聊天',
+            icon: _NavBadge(
+              count: _totalUnreadCount,
+              child: const Icon(Icons.chat_bubble_outline_rounded),
+            ),
+            selectedIcon: _NavBadge(
+              count: _totalUnreadCount,
+              child: const Icon(Icons.chat_bubble_rounded),
+            ),
+            label: '消息',
           ),
         ],
       ),
@@ -408,10 +409,23 @@ class _MobileHomePageState extends State<MobileHomePage> {
   }
 }
 
+class _NavBadge extends StatelessWidget {
+  const _NavBadge({required this.count, required this.child});
+
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count <= 0) return child;
+    return Badge(label: Text(count > 99 ? '99+' : '$count'), child: child);
+  }
+}
+
 enum PhotoStatus {
-  pending('待审核', Color(0xFFF59E0B)),
-  approved('已通过', Color(0xFF059669)),
-  rejected('未通过', Color(0xFFDC2626));
+  pending('审核中', Color(0xFFF59E0B)),
+  approved('已认证', Color(0xFF059669)),
+  rejected('需重传', Color(0xFFDC2626));
 
   const PhotoStatus(this.label, this.color);
 
@@ -457,7 +471,7 @@ class ProfilePhoto {
   factory ProfilePhoto.fromJson(Map<String, dynamic> json) {
     return ProfilePhoto(
       id: json['id']?.toString() ?? 'photo',
-      label: json['label']?.toString() ?? '照片',
+      label: json['label']?.toString() ?? '个人照片',
       status: PhotoStatus.parse(json['status']?.toString()),
     );
   }
@@ -478,21 +492,18 @@ class DatingProfile {
     required this.photos,
   });
 
-  factory DatingProfile.demo() => const DatingProfile(
-    name: '林晓',
-    city: '上海',
-    age: 29,
-    height: 165,
-    education: '本科',
-    job: '产品经理',
-    income: '20-30万',
-    marriage: '未婚',
-    intention: '一年内结婚',
-    bio: '认真生活，也认真寻找可以一起过周末的人。',
-    photos: [
-      ProfilePhoto(id: 'photo-1', label: '生活照', status: PhotoStatus.approved),
-      ProfilePhoto(id: 'photo-2', label: '旅行照', status: PhotoStatus.pending),
-    ],
+  factory DatingProfile.empty() => const DatingProfile(
+    name: '',
+    city: '',
+    age: 0,
+    height: 0,
+    education: '',
+    job: '',
+    income: '',
+    marriage: '',
+    intention: '',
+    bio: '',
+    photos: [],
   );
 
   final String name;
@@ -569,18 +580,18 @@ class DatingProfile {
   };
 
   factory DatingProfile.fromJson(Map<String, dynamic>? json) {
-    if (json == null) return DatingProfile.demo();
+    if (json == null) return DatingProfile.empty();
     return DatingProfile(
-      name: json['name']?.toString() ?? '林晓',
-      city: json['city']?.toString() ?? '上海',
-      age: int.tryParse(json['age']?.toString() ?? '') ?? 29,
-      height: int.tryParse(json['height']?.toString() ?? '') ?? 165,
-      education: json['education']?.toString() ?? '本科',
-      job: json['job']?.toString() ?? '产品经理',
-      income: json['income']?.toString() ?? '20-30万',
-      marriage: json['marriage']?.toString() ?? '未婚',
-      intention: json['intention']?.toString() ?? '一年内结婚',
-      bio: json['bio']?.toString() ?? '认真生活，也认真寻找可以一起过周末的人。',
+      name: json['name']?.toString() ?? '',
+      city: json['city']?.toString() ?? '',
+      age: int.tryParse(json['age']?.toString() ?? '') ?? 0,
+      height: int.tryParse(json['height']?.toString() ?? '') ?? 0,
+      education: json['education']?.toString() ?? '',
+      job: json['job']?.toString() ?? '',
+      income: json['income']?.toString() ?? '',
+      marriage: json['marriage']?.toString() ?? '',
+      intention: json['intention']?.toString() ?? '',
+      bio: json['bio']?.toString() ?? '',
       photos: (json['photos'] as List<dynamic>? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(ProfilePhoto.fromJson)
@@ -621,73 +632,6 @@ class Candidate {
   final bool verified;
   final List<String> tags;
   final List<Color> colors;
-
-  static List<Candidate> demoList() => const [
-    Candidate(
-      id: 1,
-      name: '周然',
-      age: 31,
-      city: '上海',
-      height: 178,
-      education: '硕士',
-      job: '建筑设计师',
-      intention: '认真婚恋',
-      bio: '喜欢展览、慢跑和做饭，希望关系里有稳定沟通。',
-      matchScore: 94,
-      likesMe: true,
-      verified: true,
-      tags: ['同城', '已实名', '爱运动'],
-      colors: [Color(0xFF2F3A56), Color(0xFFDF8E73)],
-    ),
-    Candidate(
-      id: 2,
-      name: '陈一鸣',
-      age: 32,
-      city: '杭州',
-      height: 181,
-      education: '本科',
-      job: '软件工程师',
-      intention: '稳定关系',
-      bio: '工作日写代码，周末骑行。想找一个能互相鼓励的人。',
-      matchScore: 88,
-      likesMe: false,
-      verified: true,
-      tags: ['已认证', '周末骑行', '不抽烟'],
-      colors: [Color(0xFF1E6F78), Color(0xFFF2B36D)],
-    ),
-    Candidate(
-      id: 3,
-      name: '顾北',
-      age: 30,
-      city: '苏州',
-      height: 176,
-      education: '硕士',
-      job: '高校老师',
-      intention: '一年内结婚',
-      bio: '安静但不无聊，重视家庭，也喜欢一起探索新地方。',
-      matchScore: 86,
-      likesMe: true,
-      verified: false,
-      tags: ['高学历', '重视家庭', '慢热'],
-      colors: [Color(0xFF5C5470), Color(0xFFB9A7D1)],
-    ),
-    Candidate(
-      id: 4,
-      name: '沈亦',
-      age: 33,
-      city: '南京',
-      height: 180,
-      education: '本科',
-      job: '金融分析师',
-      intention: '以结婚为前提',
-      bio: '作息规律，喜欢看书和羽毛球，希望彼此真诚坦荡。',
-      matchScore: 82,
-      likesMe: false,
-      verified: true,
-      tags: ['作息规律', '羽毛球', '理性沟通'],
-      colors: [Color(0xFF284B63), Color(0xFFDB504A)],
-    ),
-  ];
 
   factory Candidate.fromJson(Map<String, dynamic> json) {
     final id =
@@ -759,29 +703,19 @@ class MatchChat {
   MatchChat({
     required this.id,
     required this.candidate,
+    this.unreadCount = 0,
     List<ChatMessage>? messages,
-  }) : messages =
-           messages ??
-           [
-             ChatMessage(
-               text: '你好，很高兴认识你。',
-               mine: false,
-               time: DateTime.now().subtract(const Duration(minutes: 5)),
-             ),
-             ChatMessage(
-               text: '我也是，看到我们都喜欢展览。',
-               mine: true,
-               time: DateTime.now().subtract(const Duration(minutes: 4)),
-             ),
-           ];
+  }) : messages = messages ?? [];
 
   final int id;
   final Candidate candidate;
+  int unreadCount;
   final List<ChatMessage> messages;
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'candidateId': candidate.id,
+    'unreadCount': unreadCount,
     'messages': messages.map((message) => message.toJson()).toList(),
   };
 
@@ -802,6 +736,7 @@ class MatchChat {
     return MatchChat(
       id: int.tryParse(json['id']?.toString() ?? '') ?? candidate.id,
       candidate: candidate,
+      unreadCount: int.tryParse(json['unreadCount']?.toString() ?? '') ?? 0,
       messages: (json['messages'] as List<dynamic>? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(ChatMessage.fromJson)
@@ -844,6 +779,27 @@ class ChatMessage {
   }
 }
 
+String formatMessageTime(DateTime time) {
+  final local = time.toLocal();
+  return '${_twoDigits(local.hour)}:${_twoDigits(local.minute)}';
+}
+
+String formatConversationTime(DateTime time) {
+  final local = time.toLocal();
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(local.year, local.month, local.day);
+  if (day == today) {
+    return formatMessageTime(local);
+  }
+  if (day == today.subtract(const Duration(days: 1))) {
+    return '昨天';
+  }
+  return '${local.month}/${local.day}';
+}
+
+String _twoDigits(int value) => value.toString().padLeft(2, '0');
+
 List<Color> candidateColors(int id) {
   const palettes = [
     [Color(0xFF2F3A56), Color(0xFFDF8E73)],
@@ -878,12 +834,12 @@ class RecommendPage extends StatelessWidget {
       slivers: [
         SliverToBoxAdapter(
           child: PageHeader(
-            title: '今日推荐',
-            subtitle: '资料完整、认证优先、双向喜欢后开启聊天。',
+            title: '为你推荐',
+            subtitle: '根据资料完整度、认证状态和择偶意向，为你筛选更合适的人。',
             action: IconButton.filledTonal(
               onPressed: onOpenFilters,
               icon: const Icon(Icons.tune_rounded),
-              tooltip: '筛选',
+              tooltip: '筛选条件',
             ),
           ),
         ),
@@ -895,7 +851,7 @@ class RecommendPage extends StatelessWidget {
               runSpacing: 8,
               children: [
                 FilterChip(
-                  label: Text('城市：${activeFilter.city}'),
+                  label: Text('城市 ${activeFilter.city}'),
                   selected: activeFilter.city != '全部',
                   onSelected: (_) => onOpenFilters(),
                 ),
@@ -905,7 +861,7 @@ class RecommendPage extends StatelessWidget {
                   onSelected: (_) => onOpenFilters(),
                 ),
                 FilterChip(
-                  label: const Text('已认证'),
+                  label: const Text('认证用户'),
                   selected: activeFilter.verifiedOnly,
                   onSelected: (_) => onOpenFilters(),
                 ),
@@ -915,7 +871,7 @@ class RecommendPage extends StatelessWidget {
         ),
         if (candidates.isEmpty)
           const SliverToBoxAdapter(
-            child: EmptyState(text: '当前筛选没有推荐对象，放宽条件再看看。'),
+            child: EmptyState(text: '暂时没有符合条件的推荐，可以调整筛选条件后再看看。'),
           )
         else
           SliverPadding(
@@ -1013,7 +969,7 @@ class CandidateCard extends StatelessWidget {
                   top: 14,
                   right: 14,
                   child: Chip(
-                    label: Text('${candidate.matchScore}% 匹配'),
+                    label: Text('${candidate.matchScore}% 适配'),
                     backgroundColor: Colors.white,
                   ),
                 ),
@@ -1048,7 +1004,7 @@ class CandidateCard extends StatelessWidget {
                       child: OutlinedButton.icon(
                         onPressed: onSkip,
                         icon: const Icon(Icons.close_rounded),
-                        label: const Text('略过'),
+                        label: const Text('暂不考虑'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1080,13 +1036,11 @@ class ProfilePage extends StatefulWidget {
     required this.profile,
     required this.onSave,
     required this.onAddPhoto,
-    required this.onMockApprovePhoto,
   });
 
   final DatingProfile profile;
   final ValueChanged<DatingProfile> onSave;
   final VoidCallback onAddPhoto;
-  final VoidCallback onMockApprovePhoto;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -1178,7 +1132,10 @@ class _ProfilePageState extends State<ProfilePage> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        const PageHeader(title: '我的资料', subtitle: '资料越完整，推荐越准确；照片提交后进入审核。'),
+        const PageHeader(
+          title: '个人资料',
+          subtitle: '完善真实资料和照片认证，让推荐更准确，也让对方更放心。',
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Column(
@@ -1194,10 +1151,12 @@ class _ProfilePageState extends State<ProfilePage> {
                       controller: _name,
                       decoration: const InputDecoration(labelText: '昵称'),
                     ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _city,
-                      decoration: const InputDecoration(labelText: '城市'),
+                      decoration: const InputDecoration(labelText: '常住城市'),
                     ),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         Expanded(
@@ -1219,26 +1178,32 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _education,
-                      decoration: const InputDecoration(labelText: '学历'),
+                      decoration: const InputDecoration(labelText: '最高学历'),
                     ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _job,
                       decoration: const InputDecoration(labelText: '职业'),
                     ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _income,
                       decoration: const InputDecoration(labelText: '收入区间'),
                     ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _marriage,
-                      decoration: const InputDecoration(labelText: '婚史'),
+                      decoration: const InputDecoration(labelText: '婚姻状态'),
                     ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _intention,
-                      decoration: const InputDecoration(labelText: '婚恋意向'),
+                      decoration: const InputDecoration(labelText: '期待关系'),
                     ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _bio,
                       maxLines: 3,
@@ -1248,14 +1213,14 @@ class _ProfilePageState extends State<ProfilePage> {
                     Row(
                       children: [
                         const Text(
-                          '照片审核',
+                          '照片认证',
                           style: TextStyle(fontWeight: FontWeight.w800),
                         ),
                         const Spacer(),
                         IconButton.filledTonal(
                           onPressed: widget.onAddPhoto,
                           icon: const Icon(Icons.add_photo_alternate_rounded),
-                          tooltip: '添加照片',
+                          tooltip: '上传照片',
                         ),
                       ],
                     ),
@@ -1269,17 +1234,11 @@ class _ProfilePageState extends State<ProfilePage> {
                             .toList(),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: widget.onMockApprovePhoto,
-                      icon: const Icon(Icons.fact_check_rounded),
-                      label: const Text('模拟审核通过首张照片'),
-                    ),
                     const SizedBox(height: 18),
                     FilledButton.icon(
                       onPressed: _save,
                       icon: const Icon(Icons.save_rounded),
-                      label: const Text('保存资料'),
+                      label: const Text('保存并更新推荐'),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
                       ),
@@ -1402,15 +1361,16 @@ class MatchPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        const PageHeader(title: '我的匹配', subtitle: '双方都喜欢后才会出现在这里。'),
-        if (matches.isEmpty) const EmptyState(text: '还没有匹配，去推荐页点个喜欢试试。'),
+        const PageHeader(title: '互相喜欢', subtitle: '只有双方都表达喜欢后，才会开放聊天。'),
+        if (matches.isEmpty) const EmptyState(text: '还没有互相喜欢的人，去推荐页看看新的推荐。'),
         ...matches.map(
           (match) => PersonTile(
             candidate: match.candidate,
             subtitle: match.candidate.intention,
+            onTap: () => onOpenChat(match),
             trailing: IconButton.filledTonal(
               icon: const Icon(Icons.chat_bubble_rounded),
-              tooltip: '聊天',
+              tooltip: '发消息',
               onPressed: () => onOpenChat(match),
             ),
           ),
@@ -1435,17 +1395,19 @@ class ChatListPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        const PageHeader(
-          title: '聊天',
-          subtitle: '本地会话已持久化，后续可替换成 WebSocket 或 IM 服务。',
-        ),
-        if (matches.isEmpty) const EmptyState(text: '匹配成功后即可开始聊天。'),
+        const PageHeader(title: '消息', subtitle: '互相喜欢后可以在这里开始沟通，消息会实时同步。'),
+        if (matches.isEmpty) const EmptyState(text: '互相喜欢后，聊天入口会出现在这里。'),
         ...matches.map(
           (match) => PersonTile(
             candidate: match.candidate,
             subtitle: match.messages.isEmpty
-                ? '还没有消息'
+                ? '还没有消息，主动打个招呼吧'
                 : match.messages.last.text,
+            meta: match.messages.isEmpty
+                ? null
+                : formatConversationTime(match.messages.last.time),
+            badgeCount: match.unreadCount,
+            onTap: () => onOpenChat(match),
             trailing: IconButton(
               icon: const Icon(Icons.chevron_right_rounded),
               onPressed: () => onOpenChat(match),
@@ -1520,7 +1482,7 @@ class _ChatPageState extends State<ChatPage> {
           if (!mounted) return;
           setState(() {
             _wsConnected = false;
-            _error = '实时连接已断开，正在使用轮询同步';
+            _error = '当前网络不稳定，正在为你保持消息同步';
           });
           _startPollingFallback();
         },
@@ -1669,13 +1631,13 @@ class _ChatPageState extends State<ChatPage> {
                     ? const Color(0xFF059669)
                     : const Color(0xFFD97706),
               ),
-              title: Text(_wsConnected ? '实时聊天已连接' : '实时连接未建立，使用轮询同步'),
+              title: Text(_wsConnected ? '消息实时同步中' : '网络连接不稳定，正在保持同步'),
               trailing: _wsConnected
                   ? null
                   : IconButton(
                       onPressed: _connectWebSocket,
                       icon: const Icon(Icons.refresh_rounded),
-                      tooltip: '重连',
+                      tooltip: '重新连接',
                     ),
             ),
           ),
@@ -1714,7 +1676,7 @@ class _ChatPageState extends State<ChatPage> {
                   Expanded(
                     child: TextField(
                       controller: _controller,
-                      decoration: const InputDecoration(hintText: '输入消息'),
+                      decoration: const InputDecoration(hintText: '说点什么吧'),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1748,23 +1710,37 @@ class ChatBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     return Align(
       alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: const BoxConstraints(maxWidth: 280),
-        decoration: BoxDecoration(
-          color: message.mine ? const Color(0xFFE85D75) : Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: message.mine
-              ? null
-              : Border.all(color: const Color(0xFFE7E2DE)),
-        ),
-        child: Text(
-          message.text,
-          style: TextStyle(
-            color: message.mine ? Colors.white : const Color(0xFF111827),
+      child: Column(
+        crossAxisAlignment: message.mine
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            constraints: const BoxConstraints(maxWidth: 280),
+            decoration: BoxDecoration(
+              color: message.mine ? const Color(0xFFE85D75) : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: message.mine
+                  ? null
+                  : Border.all(color: const Color(0xFFE7E2DE)),
+            ),
+            child: Text(
+              message.text,
+              style: TextStyle(
+                color: message.mine ? Colors.white : const Color(0xFF111827),
+              ),
+            ),
           ),
-        ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              formatMessageTime(message.time),
+              style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1775,66 +1751,124 @@ class PersonTile extends StatelessWidget {
     super.key,
     required this.candidate,
     this.subtitle,
+    this.meta,
+    this.badgeCount = 0,
+    this.onTap,
     this.trailing,
   });
 
   final Candidate candidate;
   final String? subtitle;
+  final String? meta;
+  final int badgeCount;
+  final VoidCallback? onTap;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: panelDecoration(),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: candidate.colors.last,
-              child: Text(
-                candidate.name.characters.first,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: panelDecoration(),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '${candidate.name} · ${candidate.city}',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+                  CircleAvatar(
+                    backgroundColor: candidate.colors.last,
+                    child: Text(
+                      candidate.name.characters.first,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                '${candidate.name} · ${candidate.city}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            if (candidate.verified)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 4),
+                                child: Icon(
+                                  Icons.verified_rounded,
+                                  color: Color(0xFFE85D75),
+                                  size: 16,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                subtitle ??
+                                    '${candidate.age}岁 · ${candidate.job}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF6B7280),
+                                ),
+                              ),
+                            ),
+                            if (meta != null) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                meta!,
+                                style: const TextStyle(
+                                  color: Color(0xFF9CA3AF),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (badgeCount > 0)
+                    Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE85D75),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: Text(
+                        badgeCount > 99 ? '99+' : '$badgeCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      if (candidate.verified)
-                        const Padding(
-                          padding: EdgeInsets.only(left: 4),
-                          child: Icon(
-                            Icons.verified_rounded,
-                            color: Color(0xFFE85D75),
-                            size: 16,
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle ?? '${candidate.age}岁 · ${candidate.job}',
-                    style: const TextStyle(color: Color(0xFF6B7280)),
-                  ),
+                    ),
+                  ?trailing,
                 ],
               ),
             ),
-            ?trailing,
-          ],
+          ),
         ),
       ),
     );

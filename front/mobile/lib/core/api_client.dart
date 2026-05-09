@@ -1,10 +1,32 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  static const String baseUrl = 'http://127.0.0.1:8080';
-  static const String wsBaseUrl = 'ws://127.0.0.1:8080';
+  static const String _apiBaseUrlOverride = String.fromEnvironment(
+    'API_BASE_URL',
+  );
+  static const String _wsBaseUrlOverride = String.fromEnvironment(
+    'WS_BASE_URL',
+  );
+
+  static String get baseUrl {
+    if (_apiBaseUrlOverride.isNotEmpty) return _apiBaseUrlOverride;
+    return 'http://$defaultHost:8080';
+  }
+
+  static String get wsBaseUrl {
+    if (_wsBaseUrlOverride.isNotEmpty) return _wsBaseUrlOverride;
+    return 'ws://$defaultHost:8080';
+  }
+
+  static String get defaultHost {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return '10.0.2.2';
+    }
+    return '127.0.0.1';
+  }
 
   Future<Map<String, dynamic>> get(String path, {String? token}) async {
     final response = await http.get(

@@ -30,6 +30,7 @@ func NewRouter() http.Handler {
 	mux.HandleFunc("/api/admin/dating/photos/", admin.DatingPhotoReviewHandler)
 	mux.HandleFunc("/api/admin/dating/matches", admin.DatingMatchesHandler)
 	mux.HandleFunc("/api/admin/dating/messages", admin.DatingMessagesHandler)
+	mux.HandleFunc("/api/admin/dating/settings", admin.DatingSettingsHandler)
 
 	mux.HandleFunc("/api/mobile/register", mobile.RegisterHandler)
 	mux.HandleFunc("/api/mobile/profile", mobile.ProfileHandler)

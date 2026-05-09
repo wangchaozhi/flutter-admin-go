@@ -194,6 +194,26 @@ func (MobileMessage) TableName() string {
 	return "mobile_messages"
 }
 
+type MobileMessageRead struct {
+	MatchID    int       `gorm:"primaryKey;column:match_id"`
+	UserID     int       `gorm:"primaryKey;column:user_id"`
+	LastReadAt time.Time `gorm:"column:last_read_at"`
+}
+
+func (MobileMessageRead) TableName() string {
+	return "mobile_message_reads"
+}
+
+type AppSetting struct {
+	Key       string    `gorm:"primaryKey;column:key"`
+	Value     string    `gorm:"column:value"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (AppSetting) TableName() string {
+	return "app_settings"
+}
+
 func Init(_ string) error {
 	dsn := strings.TrimSpace(os.Getenv("DATABASE_DSN"))
 	if dsn == "" {

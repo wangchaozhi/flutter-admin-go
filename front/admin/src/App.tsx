@@ -25,6 +25,7 @@ import type {
   DatingMatch,
   DatingMessage,
   DatingPhoto,
+  DatingSettings,
   DatingUser,
   Entity,
   LoginResponse,
@@ -324,6 +325,7 @@ function AdminDashboard({
   const [datingPhotos, setDatingPhotos] = useState<DatingPhoto[]>([])
   const [datingMatches, setDatingMatches] = useState<DatingMatch[]>([])
   const [datingMessages, setDatingMessages] = useState<DatingMessage[]>([])
+  const [datingSettings, setDatingSettings] = useState<DatingSettings>({ photoReviewEnabled: true })
   const [selectedDatingMatchId, setSelectedDatingMatchId] = useState<number | null>(null)
   const [userForm, setUserForm] = useState<UserForm>(emptyUser)
   const [roleForm, setRoleForm] = useState<RoleForm>(emptyRole)
@@ -373,6 +375,7 @@ function AdminDashboard({
         nextDatingUsers,
         nextDatingPhotos,
         nextDatingMatches,
+        nextDatingSettings,
       ] = await Promise.all([
         request<User[]>('/api/admin/users'),
         request<Role[]>('/api/admin/roles'),
@@ -380,6 +383,7 @@ function AdminDashboard({
         request<DatingUser[]>('/api/admin/dating/users'),
         request<DatingPhoto[]>('/api/admin/dating/photos'),
         request<DatingMatch[]>('/api/admin/dating/matches'),
+        request<DatingSettings>('/api/admin/dating/settings'),
       ])
       setUsers(nextUsers ?? [])
       setRoles(nextRoles ?? [])
@@ -387,6 +391,7 @@ function AdminDashboard({
       setDatingUsers(nextDatingUsers ?? [])
       setDatingPhotos(nextDatingPhotos ?? [])
       setDatingMatches(nextDatingMatches ?? [])
+      setDatingSettings(nextDatingSettings ?? { photoReviewEnabled: true })
       if (!selectedDatingMatchId && nextDatingMatches?.[0]) {
         setSelectedDatingMatchId(nextDatingMatches[0].id)
         void loadDatingMessages(nextDatingMatches[0].id)
@@ -422,6 +427,24 @@ function AdminDashboard({
       setNotice('照片审核状态已更新')
     } catch (err) {
       setError(err instanceof Error ? err.message : '照片审核失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveDatingSettings(settings: DatingSettings) {
+    setSaving(true)
+    setError('')
+    try {
+      const nextSettings = await request<DatingSettings>('/api/admin/dating/settings', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      })
+      setDatingSettings(nextSettings ?? settings)
+      await loadAll()
+      setNotice(settings.photoReviewEnabled ? '照片审核已开启' : '照片审核已关闭，新照片将自动认证')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '配置保存失败')
     } finally {
       setSaving(false)
     }
@@ -764,11 +787,13 @@ function AdminDashboard({
             photos={datingPhotos}
             matches={datingMatches}
             messages={datingMessages}
+            settings={datingSettings}
             saving={saving}
             canReview={can('dating:review')}
             selectedMatchId={selectedDatingMatchId}
             onRefresh={loadAll}
             onReviewPhoto={reviewDatingPhoto}
+            onSettingsChange={(settings) => void saveDatingSettings(settings)}
             onSelectMatch={(id) => void loadDatingMessages(id)}
           />
         )}
