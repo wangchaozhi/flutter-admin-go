@@ -10,7 +10,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.text('Mobile Console'), findsOneWidget);
-    expect(find.text('记住密码'), findsOneWidget);
+    expect(find.text('心遇婚恋'), findsOneWidget);
+    expect(find.text('记住登录信息'), findsOneWidget);
   });
 }

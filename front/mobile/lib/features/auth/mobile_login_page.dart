@@ -13,12 +13,13 @@ class MobileLoginPage extends StatefulWidget {
 
 class _MobileLoginPageState extends State<MobileLoginPage> {
   final _storage = LoginStorage();
-  final _usernameController = TextEditingController(text: 'user');
-  final _passwordController = TextEditingController();
+  final _usernameController = TextEditingController(text: '13800000000');
+  final _passwordController = TextEditingController(text: '123456');
 
   bool _loading = false;
   bool _remember = false;
   bool _ready = false;
+  bool _registerMode = false;
   String _usernameError = '';
   String _passwordError = '';
 
@@ -39,49 +40,55 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
     final saved = await _storage.load();
     if (!mounted) return;
 
-    _usernameController.text = saved.username;
-    _passwordController.text = saved.password;
+    _usernameController.text = saved.username == 'user'
+        ? '13800000000'
+        : saved.username;
+    _passwordController.text = saved.password.isEmpty
+        ? '123456'
+        : saved.password;
     setState(() {
       _remember = saved.remember;
       _ready = true;
     });
   }
 
-  Future<void> _login() async {
+  Future<void> _enterApp() async {
     if (!_validate()) return;
 
     setState(() => _loading = true);
     try {
       final username = _usernameController.text.trim();
       final password = _passwordController.text;
-      final resp = await ApiClient().post('/api/mobile/login', {
-        'username': username,
-        'password': password,
-      });
 
+      final resp = await ApiClient().post(
+        _registerMode ? '/api/mobile/register' : '/api/mobile/login',
+        {'username': username, 'password': password},
+      );
       if (!mounted) return;
       if (resp['code'] != 0) {
         _showMessage(resp['msg']?.toString() ?? '登录失败');
         return;
       }
+      final data = resp['data'] as Map<String, dynamic>? ?? {};
+      final token = data['token']?.toString() ?? '';
 
       await _storage.save(
         username: username,
         password: password,
         remember: _remember,
+        token: token,
       );
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/home');
-    } catch (e) {
-      if (!mounted) return;
-      _showMessage('登录失败: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   bool _validate() {
-    final usernameError = _usernameController.text.trim().isEmpty ? '请输入用户名' : '';
+    final usernameError = _usernameController.text.trim().isEmpty
+        ? '请输入手机号'
+        : '';
     final passwordError = _passwordController.text.isEmpty ? '请输入密码' : '';
     setState(() {
       _usernameError = usernameError;
@@ -92,10 +99,7 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -106,78 +110,39 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
     }
 
     return Scaffold(
-      body: Stack(
-        children: [
-          const _LoginBackground(),
-          SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 430),
-                  child: _LoginCard(
-                    usernameController: _usernameController,
-                    passwordController: _passwordController,
-                    usernameError: _usernameError,
-                    passwordError: _passwordError,
-                    remember: _remember,
-                    loading: _loading,
-                    onRememberChanged: (value) => setState(() => _remember = value),
-                    onLogin: _login,
-                  ),
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFFFFBF7), Color(0xFFFFEEF2), Color(0xFFF4F8FB)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: _LoginCard(
+                  usernameController: _usernameController,
+                  passwordController: _passwordController,
+                  usernameError: _usernameError,
+                  passwordError: _passwordError,
+                  remember: _remember,
+                  registerMode: _registerMode,
+                  loading: _loading,
+                  onRememberChanged: (value) =>
+                      setState(() => _remember = value),
+                  onModeChanged: (value) =>
+                      setState(() => _registerMode = value),
+                  onLogin: _enterApp,
                 ),
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LoginBackground extends StatelessWidget {
-  const _LoginBackground();
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFF8FAFC), Color(0xFFEFF6FF), Color(0xFFF0FDFA)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
         ),
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -90,
-            right: -80,
-            child: _BlurCircle(color: const Color(0x332563EB), size: 220),
-          ),
-          Positioned(
-            bottom: -70,
-            left: -70,
-            child: _BlurCircle(color: const Color(0x3314B8A6), size: 190),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BlurCircle extends StatelessWidget {
-  const _BlurCircle({required this.color, required this.size});
-
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
 }
@@ -189,8 +154,10 @@ class _LoginCard extends StatelessWidget {
     required this.usernameError,
     required this.passwordError,
     required this.remember,
+    required this.registerMode,
     required this.loading,
     required this.onRememberChanged,
+    required this.onModeChanged,
     required this.onLogin,
   });
 
@@ -199,17 +166,19 @@ class _LoginCard extends StatelessWidget {
   final String usernameError;
   final String passwordError;
   final bool remember;
+  final bool registerMode;
   final bool loading;
   final ValueChanged<bool> onRememberChanged;
+  final ValueChanged<bool> onModeChanged;
   final VoidCallback onLogin;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.94),
+      color: Colors.white.withValues(alpha: 0.96),
       elevation: 18,
       shadowColor: const Color(0x1F0F172A),
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -218,13 +187,25 @@ class _LoginCard extends StatelessWidget {
           children: [
             const LoginHeader(),
             const SizedBox(height: 26),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('登录')),
+                ButtonSegment(value: true, label: Text('注册')),
+              ],
+              selected: {registerMode},
+              onSelectionChanged: loading
+                  ? null
+                  : (values) => onModeChanged(values.first),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: usernameController,
+              keyboardType: TextInputType.phone,
               textInputAction: TextInputAction.next,
               decoration: _fieldDecoration(
-                label: '用户名',
-                hint: '请输入用户名',
-                icon: Icons.person_outline_rounded,
+                label: '手机号',
+                hint: '请输入手机号',
+                icon: Icons.phone_iphone_rounded,
                 error: usernameError,
               ),
             ),
@@ -247,7 +228,7 @@ class _LoginCard extends StatelessWidget {
             SwitchListTile.adaptive(
               value: remember,
               contentPadding: EdgeInsets.zero,
-              title: const Text('记住密码'),
+              title: const Text('记住登录信息'),
               subtitle: const Text('下次打开自动回填账号和密码'),
               onChanged: loading ? null : onRememberChanged,
             ),
@@ -261,11 +242,11 @@ class _LoginCard extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.arrow_forward_rounded),
-              label: Text(loading ? '登录中...' : '登录'),
+              label: Text(loading ? '处理中...' : (registerMode ? '注册并进入' : '登录')),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
             ),
@@ -287,14 +268,14 @@ class _LoginCard extends StatelessWidget {
       errorText: error.isEmpty ? null : error,
       prefixIcon: Icon(icon),
       filled: true,
-      fillColor: const Color(0xFFF8FAFC),
+      fillColor: const Color(0xFFFAF7F5),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFE7E2DE)),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFE7E2DE)),
       ),
     );
   }

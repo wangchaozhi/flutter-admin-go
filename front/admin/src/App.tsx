@@ -6,6 +6,7 @@ import {
   KeyRound,
   LogOut,
   Menu as MenuIcon,
+  HeartHandshake,
   Monitor,
   Moon,
   ImageUp,
@@ -21,6 +22,10 @@ import type {
   AdminSession,
   ApiResponse,
   ConfirmDialogState,
+  DatingMatch,
+  DatingMessage,
+  DatingPhoto,
+  DatingUser,
   Entity,
   LoginResponse,
   Menu,
@@ -36,6 +41,7 @@ import { ConfirmDialog } from './components/confirm'
 import { MenuManagementSection, buildMenuTree } from './features/menus'
 import { RoleManagementSection } from './features/roles'
 import { UserManagementSection } from './features/users'
+import { DatingOperationsSection } from './features/dating'
 
 const emptyUser: UserForm = {
   username: '',
@@ -62,6 +68,7 @@ const tabs: Array<{ key: Entity; label: string; icon: typeof Users }> = [
   { key: 'users', label: '用户', icon: Users },
   { key: 'roles', label: '角色', icon: Shield },
   { key: 'menus', label: '菜单', icon: MenuIcon },
+  { key: 'dating', label: '婚恋运营', icon: HeartHandshake },
 ]
 
 const adminRememberKey = 'admin.remember'
@@ -313,6 +320,11 @@ function AdminDashboard({
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [menus, setMenus] = useState<Menu[]>([])
+  const [datingUsers, setDatingUsers] = useState<DatingUser[]>([])
+  const [datingPhotos, setDatingPhotos] = useState<DatingPhoto[]>([])
+  const [datingMatches, setDatingMatches] = useState<DatingMatch[]>([])
+  const [datingMessages, setDatingMessages] = useState<DatingMessage[]>([])
+  const [selectedDatingMatchId, setSelectedDatingMatchId] = useState<number | null>(null)
   const [userForm, setUserForm] = useState<UserForm>(emptyUser)
   const [roleForm, setRoleForm] = useState<RoleForm>(emptyRole)
   const [menuForm, setMenuForm] = useState<MenuForm>(emptyMenu)
@@ -344,7 +356,8 @@ function AdminDashboard({
       tabs
         .filter((tab) => tab.key !== 'users' || menuPaths.has('/system/user'))
         .filter((tab) => tab.key !== 'roles' || menuPaths.has('/system/role'))
-        .filter((tab) => tab.key !== 'menus' || menuPaths.has('/system/menu')),
+        .filter((tab) => tab.key !== 'menus' || menuPaths.has('/system/menu'))
+        .filter((tab) => tab.key !== 'dating' || menuPaths.has('/dating')),
     [menuPaths],
   )
   const can = (permission: string) => permissions.has(permission)
@@ -353,20 +366,64 @@ function AdminDashboard({
     setLoading(true)
     setError('')
     try {
-      const [nextUsers, nextRoles, nextMenus] = await Promise.all([
+      const [
+        nextUsers,
+        nextRoles,
+        nextMenus,
+        nextDatingUsers,
+        nextDatingPhotos,
+        nextDatingMatches,
+      ] = await Promise.all([
         request<User[]>('/api/admin/users'),
         request<Role[]>('/api/admin/roles'),
         request<Menu[]>('/api/admin/menus'),
+        request<DatingUser[]>('/api/admin/dating/users'),
+        request<DatingPhoto[]>('/api/admin/dating/photos'),
+        request<DatingMatch[]>('/api/admin/dating/matches'),
       ])
       setUsers(nextUsers ?? [])
       setRoles(nextRoles ?? [])
       setMenus(nextMenus ?? [])
+      setDatingUsers(nextDatingUsers ?? [])
+      setDatingPhotos(nextDatingPhotos ?? [])
+      setDatingMatches(nextDatingMatches ?? [])
+      if (!selectedDatingMatchId && nextDatingMatches?.[0]) {
+        setSelectedDatingMatchId(nextDatingMatches[0].id)
+        void loadDatingMessages(nextDatingMatches[0].id)
+      }
       setNotice('数据已同步')
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
       setNotice('数据加载失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadDatingMessages(matchId: number) {
+    try {
+      const nextMessages = await request<DatingMessage[]>(`/api/admin/dating/messages?matchId=${matchId}`)
+      setDatingMessages(nextMessages ?? [])
+      setSelectedDatingMatchId(matchId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '聊天记录加载失败')
+    }
+  }
+
+  async function reviewDatingPhoto(id: number, status: DatingPhoto['status']) {
+    setSaving(true)
+    setError('')
+    try {
+      await request(`/api/admin/dating/photos/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      })
+      await loadAll()
+      setNotice('照片审核状态已更新')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '照片审核失败')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -698,6 +755,21 @@ function AdminDashboard({
             onMenuFormChange={setMenuForm}
             onSaveMenu={saveMenu}
             onDeleteMenu={(id) => deleteRecord('menus', id)}
+          />
+        )}
+
+        {active === 'dating' && (
+          <DatingOperationsSection
+            users={datingUsers}
+            photos={datingPhotos}
+            matches={datingMatches}
+            messages={datingMessages}
+            saving={saving}
+            canReview={can('dating:review')}
+            selectedMatchId={selectedDatingMatchId}
+            onRefresh={loadAll}
+            onReviewPhoto={reviewDatingPhoto}
+            onSelectMatch={(id) => void loadDatingMessages(id)}
           />
         )}
       </section>

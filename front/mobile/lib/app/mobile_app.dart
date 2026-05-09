@@ -12,16 +12,16 @@ class MobileApp extends StatelessWidget {
     final foruiTheme = FThemes.zinc.light.touch;
 
     return MaterialApp(
-      title: 'Mobile',
+      title: '心遇',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: FLocalizations.localizationsDelegates,
       supportedLocales: FLocalizations.supportedLocales,
       theme: foruiTheme.toApproximateMaterialTheme().copyWith(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2563EB),
+          seedColor: const Color(0xFFE85D75),
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFFF6F7FB),
+        scaffoldBackgroundColor: const Color(0xFFFAF7F5),
       ),
       builder: (context, child) => FTheme(data: foruiTheme, child: child!),
       initialRoute: '/login',

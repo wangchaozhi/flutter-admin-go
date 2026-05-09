@@ -666,15 +666,23 @@ func normalizeMenuPayload(req *menuPayload) {
 }
 
 func BuildAdminToken(username string) string {
-	return "admin-token:" + username
+	token := fmt.Sprintf("admin-token:%s:%d", username, time.Now().UnixNano())
+	_ = store.Redis().Set(context.Background(), "session:"+token, username, 7*24*time.Hour).Err()
+	return token
 }
 
 func CurrentAdminUsername(r *http.Request) (string, bool) {
 	raw := strings.TrimSpace(r.Header.Get("Authorization"))
 	raw = strings.TrimPrefix(raw, "Bearer ")
 	if strings.HasPrefix(raw, "admin-token:") {
-		username := strings.TrimPrefix(raw, "admin-token:")
-		return username, username != ""
+		if username, err := store.Redis().Get(context.Background(), "session:"+raw).Result(); err == nil && username != "" {
+			_ = store.Redis().Expire(context.Background(), "session:"+raw, 7*24*time.Hour).Err()
+			return username, true
+		}
+		parts := strings.Split(raw, ":")
+		if len(parts) >= 2 {
+			return parts[1], parts[1] != ""
+		}
 	}
 	return "", false
 }
@@ -786,6 +794,8 @@ func menuPermissionCode(path string) string {
 		return "system:role"
 	case "/system/menu":
 		return "system:menu"
+	case "/dating":
+		return "dating"
 	default:
 		return ""
 	}

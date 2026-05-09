@@ -5,17 +5,20 @@ class SavedLogin {
     required this.username,
     required this.password,
     required this.remember,
+    required this.token,
   });
 
   final String username;
   final String password;
   final bool remember;
+  final String token;
 }
 
 class LoginStorage {
   static const _rememberKey = 'mobile.remember';
   static const _usernameKey = 'mobile.username';
   static const _passwordKey = 'mobile.password';
+  static const _tokenKey = 'mobile.token';
 
   Future<SavedLogin> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -25,6 +28,7 @@ class LoginStorage {
       username: prefs.getString(_usernameKey) ?? 'user',
       password: remember ? prefs.getString(_passwordKey) ?? '' : '',
       remember: remember,
+      token: prefs.getString(_tokenKey) ?? '',
     );
   }
 
@@ -32,6 +36,7 @@ class LoginStorage {
     required String username,
     required String password,
     required bool remember,
+    String? token,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_rememberKey, remember);
@@ -39,10 +44,18 @@ class LoginStorage {
     if (!remember) {
       await prefs.remove(_usernameKey);
       await prefs.remove(_passwordKey);
-      return;
+    } else {
+      await prefs.setString(_usernameKey, username);
+      await prefs.setString(_passwordKey, password);
     }
 
-    await prefs.setString(_usernameKey, username);
-    await prefs.setString(_passwordKey, password);
+    if (token != null) {
+      await prefs.setString(_tokenKey, token);
+    }
+  }
+
+  Future<String> loadToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_tokenKey) ?? '';
   }
 }

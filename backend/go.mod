@@ -3,13 +3,16 @@ module flutter-admin-go
 go 1.26.0
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/minio/minio-go/v7 v7.1.0
+	github.com/redis/go-redis/v9 v9.7.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

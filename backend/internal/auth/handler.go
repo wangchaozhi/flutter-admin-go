@@ -6,6 +6,7 @@ import (
 
 	"flutter-admin-go/internal/admin"
 	"flutter-admin-go/internal/common"
+	"flutter-admin-go/internal/mobile"
 )
 
 type LoginRequest struct {
@@ -79,5 +80,5 @@ func MobileLoginHandler(w http.ResponseWriter, r *http.Request) {
 		common.WriteJSON(w, http.StatusUnauthorized, common.APIResponse{Code: 401, Msg: "invalid credentials"})
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: LoginResponse{Token: "mobile-token", Username: req.Username, Client: "mobile"}})
+	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: LoginResponse{Token: mobile.BuildToken(req.Username), Username: req.Username, Client: "mobile"}})
 }

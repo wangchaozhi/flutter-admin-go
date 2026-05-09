@@ -13,6 +13,7 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.3.3
   forui: ^0.21.3
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

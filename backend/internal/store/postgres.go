@@ -9,9 +9,11 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -21,12 +23,14 @@ const defaultMinIOEndpoint = "localhost:9000"
 const defaultMinIOAccessKey = "admin_go"
 const defaultMinIOSecretKey = "admin_go_password"
 const defaultAvatarBucket = "admin-avatars"
+const defaultRedisAddr = "localhost:6379"
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
 var db *gorm.DB
 var objectClient *minio.Client
+var redisClient *redis.Client
 var avatarBucket string
 
 type IntArray []int
@@ -115,6 +119,81 @@ func (MobileUser) TableName() string {
 	return "mobile_users"
 }
 
+type MobileProfile struct {
+	UserID    int    `gorm:"primaryKey;column:user_id"`
+	Name      string `gorm:"column:name"`
+	City      string `gorm:"column:city"`
+	Age       int    `gorm:"column:age"`
+	Height    int    `gorm:"column:height"`
+	Education string `gorm:"column:education"`
+	Job       string `gorm:"column:job"`
+	Income    string `gorm:"column:income"`
+	Marriage  string `gorm:"column:marriage"`
+	Intention string `gorm:"column:intention"`
+	Bio       string `gorm:"column:bio"`
+}
+
+func (MobileProfile) TableName() string {
+	return "mobile_profiles"
+}
+
+type MobilePhoto struct {
+	ID        int       `gorm:"primaryKey;column:id"`
+	UserID    int       `gorm:"column:user_id"`
+	Label     string    `gorm:"column:label"`
+	Status    string    `gorm:"column:status"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (MobilePhoto) TableName() string {
+	return "mobile_photos"
+}
+
+type MobileLike struct {
+	ID         int       `gorm:"primaryKey;column:id"`
+	FromUserID int       `gorm:"column:from_user_id"`
+	ToUserID   int       `gorm:"column:to_user_id"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+}
+
+func (MobileLike) TableName() string {
+	return "mobile_likes"
+}
+
+type MobilePass struct {
+	ID         int       `gorm:"primaryKey;column:id"`
+	FromUserID int       `gorm:"column:from_user_id"`
+	ToUserID   int       `gorm:"column:to_user_id"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+}
+
+func (MobilePass) TableName() string {
+	return "mobile_passes"
+}
+
+type MobileMatch struct {
+	ID        int       `gorm:"primaryKey;column:id"`
+	UserAID   int       `gorm:"column:user_a_id"`
+	UserBID   int       `gorm:"column:user_b_id"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (MobileMatch) TableName() string {
+	return "mobile_matches"
+}
+
+type MobileMessage struct {
+	ID        int       `gorm:"primaryKey;column:id"`
+	MatchID   int       `gorm:"column:match_id"`
+	SenderID  int       `gorm:"column:sender_id"`
+	Content   string    `gorm:"column:content"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (MobileMessage) TableName() string {
+	return "mobile_messages"
+}
+
 func Init(_ string) error {
 	dsn := strings.TrimSpace(os.Getenv("DATABASE_DSN"))
 	if dsn == "" {
@@ -142,6 +221,9 @@ func Init(_ string) error {
 	if err = initObjectStore(); err != nil {
 		return err
 	}
+	if err = initRedis(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -155,6 +237,21 @@ func ObjectClient() *minio.Client {
 
 func AvatarBucket() string {
 	return avatarBucket
+}
+
+func Redis() *redis.Client {
+	return redisClient
+}
+
+func initRedis() error {
+	addr := envOrDefault("REDIS_ADDR", defaultRedisAddr)
+	password := strings.TrimSpace(os.Getenv("REDIS_PASSWORD"))
+	client := redis.NewClient(&redis.Options{Addr: addr, Password: password})
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		return fmt.Errorf("ping redis: %w", err)
+	}
+	redisClient = client
+	return nil
 }
 
 func initObjectStore() error {

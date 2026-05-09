@@ -1,4 +1,4 @@
-export type Entity = 'users' | 'roles' | 'menus'
+export type Entity = 'users' | 'roles' | 'menus' | 'dating'
 
 export type User = {
   id: number
@@ -59,4 +59,47 @@ export type ConfirmDialogState = {
   message: string
   confirmLabel: string
   onConfirm: () => void
+}
+
+export type DatingPhoto = {
+  id: number
+  userId: number
+  username?: string
+  name?: string
+  label: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: string
+}
+
+export type DatingUser = {
+  userId: number
+  username: string
+  name: string
+  city: string
+  age: number
+  height: number
+  education: string
+  job: string
+  income: string
+  marriage: string
+  intention: string
+  bio: string
+  completion: number
+  photos: DatingPhoto[]
+}
+
+export type DatingMatch = {
+  id: number
+  userA: string
+  userB: string
+  createdAt: string
+  messages: number
+}
+
+export type DatingMessage = {
+  id: number
+  matchId: number
+  sender: string
+  content: string
+  createdAt: string
 }

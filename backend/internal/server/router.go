@@ -6,6 +6,7 @@ import (
 	"flutter-admin-go/internal/admin"
 	"flutter-admin-go/internal/auth"
 	"flutter-admin-go/internal/common"
+	"flutter-admin-go/internal/mobile"
 )
 
 func NewRouter() http.Handler {
@@ -24,6 +25,21 @@ func NewRouter() http.Handler {
 	mux.HandleFunc("/api/admin/roles/", admin.RoleByIDHandler)
 	mux.HandleFunc("/api/admin/menus", admin.MenusHandler)
 	mux.HandleFunc("/api/admin/menus/", admin.MenuByIDHandler)
+	mux.HandleFunc("/api/admin/dating/users", admin.DatingUsersHandler)
+	mux.HandleFunc("/api/admin/dating/photos", admin.DatingPhotosHandler)
+	mux.HandleFunc("/api/admin/dating/photos/", admin.DatingPhotoReviewHandler)
+	mux.HandleFunc("/api/admin/dating/matches", admin.DatingMatchesHandler)
+	mux.HandleFunc("/api/admin/dating/messages", admin.DatingMessagesHandler)
+
+	mux.HandleFunc("/api/mobile/register", mobile.RegisterHandler)
+	mux.HandleFunc("/api/mobile/profile", mobile.ProfileHandler)
+	mux.HandleFunc("/api/mobile/photos", mobile.PhotosHandler)
+	mux.HandleFunc("/api/mobile/recommendations", mobile.RecommendationsHandler)
+	mux.HandleFunc("/api/mobile/likes", mobile.LikesHandler)
+	mux.HandleFunc("/api/mobile/passes", mobile.PassesHandler)
+	mux.HandleFunc("/api/mobile/matches", mobile.MatchesHandler)
+	mux.HandleFunc("/api/mobile/chats/", mobile.ChatMessagesHandler)
+	mux.HandleFunc("/api/mobile/ws/chats/", mobile.ChatWebSocketHandler)
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: map[string]string{"status": "up"}})
