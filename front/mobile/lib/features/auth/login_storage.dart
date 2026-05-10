@@ -58,4 +58,9 @@ class LoginStorage {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_tokenKey) ?? '';
   }
+
+  Future<void> clearToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_tokenKey);
+  }
 }

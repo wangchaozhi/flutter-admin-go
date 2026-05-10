@@ -17,6 +17,7 @@ type DatingUser struct {
 	UserID     int           `json:"userId"`
 	Username   string        `json:"username"`
 	Name       string        `json:"name"`
+	Gender     string        `json:"gender"`
 	City       string        `json:"city"`
 	Age        int           `json:"age"`
 	Height     int           `json:"height"`
@@ -28,6 +29,18 @@ type DatingUser struct {
 	Bio        string        `json:"bio"`
 	Photos     []DatingPhoto `json:"photos"`
 	Completion int           `json:"completion"`
+}
+
+type MobileAccount struct {
+	UserID     int    `json:"userId"`
+	Username   string `json:"username"`
+	Nickname   string `json:"nickname"`
+	HasProfile bool   `json:"hasProfile"`
+	Completion int    `json:"completion"`
+}
+
+type resetPasswordPayload struct {
+	Password string `json:"password"`
 }
 
 type DatingPhoto struct {
@@ -146,6 +159,96 @@ func DatingPhotoReviewHandler(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok"})
 }
 
+func DatingMatchByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
+		return
+	}
+	if !authorize(w, r, "dating:review") {
+		return
+	}
+	id, ok := parseID(r.URL.Path, "/api/admin/dating/matches/")
+	if !ok {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid id"})
+		return
+	}
+	if err := store.DB().Delete(&store.MobileMatch{}, id).Error; err != nil {
+		common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+		return
+	}
+	invalidateDatingCache()
+	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok"})
+}
+
+func DatingMobileUsersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
+		return
+	}
+	if !authorize(w, r, "") {
+		return
+	}
+	var users []store.MobileUser
+	if err := store.DB().Order("id ASC").Find(&users).Error; err != nil {
+		common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+		return
+	}
+	result := make([]MobileAccount, 0, len(users))
+	for _, user := range users {
+		account := MobileAccount{UserID: user.ID, Username: user.Username, Nickname: user.Nickname}
+		var profile store.MobileProfile
+		if err := store.DB().Where("user_id = ?", user.ID).First(&profile).Error; err == nil {
+			account.HasProfile = true
+			dtoUser := DatingUser{
+				Name: profile.Name, Gender: profile.Gender, City: profile.City, Age: profile.Age,
+				Height: profile.Height, Education: profile.Education, Job: profile.Job, Income: profile.Income,
+				Marriage: profile.Marriage, Intention: profile.Intention, Bio: profile.Bio,
+			}
+			var photos []store.MobilePhoto
+			_ = store.DB().Where("user_id = ?", user.ID).Find(&photos).Error
+			for _, p := range photos {
+				dtoUser.Photos = append(dtoUser.Photos, datingPhotoDTO(p))
+			}
+			account.Completion = datingCompletion(dtoUser)
+		}
+		result = append(result, account)
+	}
+	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: result})
+}
+
+func DatingMobileUserByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if !authorize(w, r, "dating:review") {
+		return
+	}
+	id, ok := parseID(r.URL.Path, "/api/admin/dating/mobile-users/")
+	if !ok {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid id"})
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		if err := store.DB().Delete(&store.MobileUser{}, id).Error; err != nil {
+			common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+			return
+		}
+		invalidateDatingCache()
+		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok"})
+	case http.MethodPut:
+		var req resetPasswordPayload
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Password) == "" {
+			common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "password required"})
+			return
+		}
+		if err := store.DB().Model(&store.MobileUser{}).Where("id = ?", id).Update("password", strings.TrimSpace(req.Password)).Error; err != nil {
+			common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+			return
+		}
+		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok"})
+	default:
+		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
+	}
+}
+
 func DatingMatchesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
@@ -252,8 +355,8 @@ func datingUserDTO(profile store.MobileProfile) (DatingUser, error) {
 		return DatingUser{}, err
 	}
 	dto := DatingUser{
-		UserID: profile.UserID, Username: user.Username, Name: profile.Name, City: profile.City,
-		Age: profile.Age, Height: profile.Height, Education: profile.Education, Job: profile.Job,
+		UserID: profile.UserID, Username: user.Username, Name: profile.Name, Gender: profile.Gender,
+		City: profile.City, Age: profile.Age, Height: profile.Height, Education: profile.Education, Job: profile.Job,
 		Income: profile.Income, Marriage: profile.Marriage, Intention: profile.Intention, Bio: profile.Bio,
 	}
 	for _, photo := range photos {
@@ -288,7 +391,7 @@ func mobileDisplayName(userID int) string {
 
 func datingCompletion(user DatingUser) int {
 	fields := []string{
-		user.Name, user.City, strconv.Itoa(user.Age), strconv.Itoa(user.Height),
+		user.Name, user.Gender, user.City, strconv.Itoa(user.Age), strconv.Itoa(user.Height),
 		user.Education, user.Job, user.Income, user.Marriage, user.Intention, user.Bio,
 	}
 	filled := 0
@@ -300,7 +403,7 @@ func datingCompletion(user DatingUser) int {
 	if len(user.Photos) > 0 {
 		filled++
 	}
-	return filled * 100 / 11
+	return filled * 100 / 12
 }
 
 func invalidateDatingCache() {

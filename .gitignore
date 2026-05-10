@@ -1,3 +1,6 @@
+# Go IDE / Delve 调试产物
+**/__debug_bin*
+
 .idea/
 .vscode/*
 !.vscode/launch.json

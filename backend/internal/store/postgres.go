@@ -116,6 +116,7 @@ func (MobileUser) TableName() string {
 type MobileProfile struct {
 	UserID    int    `gorm:"primaryKey;column:user_id"`
 	Name      string `gorm:"column:name"`
+	Gender    string `gorm:"column:gender"`
 	City      string `gorm:"column:city"`
 	Age       int    `gorm:"column:age"`
 	Height    int    `gorm:"column:height"`

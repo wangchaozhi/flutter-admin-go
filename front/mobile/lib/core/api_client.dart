@@ -62,6 +62,14 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> delete(String path, {String? token}) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers(token),
+    );
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   Map<String, String> _headers(String? token) {
     return {
       'Content-Type': 'application/json',

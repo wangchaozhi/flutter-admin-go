@@ -157,19 +157,6 @@ class _MobileHomePageState extends State<MobileHomePage> {
     );
   }
 
-  void _addPhoto() async {
-    final nextIndex = _profile.photos.length + 1;
-    final resp = await ApiClient().post('/api/mobile/photos', {
-      'label': '个人照片 $nextIndex',
-    }, token: _token);
-    final data = resp['data'] as Map<String, dynamic>? ?? {};
-    setState(() {
-      _profile = _profile.copyWith(
-        photos: [..._profile.photos, ProfilePhoto.fromJson(data)],
-      );
-    });
-  }
-
   void _openChat(MatchChat match) async {
     setState(() => match.unreadCount = 0);
     await Navigator.of(context).push(
@@ -189,8 +176,8 @@ class _MobileHomePageState extends State<MobileHomePage> {
           body: SafeArea(
             child: ProfilePage(
               profile: _profile,
+              token: _token,
               onSave: _saveProfile,
-              onAddPhoto: _addPhoto,
             ),
           ),
         ),
@@ -269,7 +256,9 @@ class _MobileHomePageState extends State<MobileHomePage> {
     );
   }
 
-  void _logout() {
+  Future<void> _logout() async {
+    await LoginStorage().clearToken();
+    if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/login');
   }
 
@@ -322,6 +311,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
         onLike: _like,
         onSkip: _skip,
         onOpenFilters: _openFilters,
+        onRefresh: _loadRemoteState,
       ),
       MatchPage(matches: _matches, onOpenChat: _openChat),
       ChatListPage(matches: _matches, onOpenChat: _openChat),
@@ -480,6 +470,7 @@ class ProfilePhoto {
 class DatingProfile {
   const DatingProfile({
     required this.name,
+    required this.gender,
     required this.city,
     required this.age,
     required this.height,
@@ -494,6 +485,7 @@ class DatingProfile {
 
   factory DatingProfile.empty() => const DatingProfile(
     name: '',
+    gender: '',
     city: '',
     age: 0,
     height: 0,
@@ -507,6 +499,7 @@ class DatingProfile {
   );
 
   final String name;
+  final String gender;
   final String city;
   final int age;
   final int height;
@@ -521,6 +514,7 @@ class DatingProfile {
   int get completion {
     final fields = [
       name,
+      gender,
       city,
       age.toString(),
       height.toString(),
@@ -532,13 +526,14 @@ class DatingProfile {
       bio,
     ];
     final filled =
-        fields.where((field) => field.trim().isNotEmpty).length +
+        fields.where((f) => f.trim().isNotEmpty && f != '0').length +
         (photos.isNotEmpty ? 1 : 0);
-    return ((filled / 11) * 100).round();
+    return ((filled / 12) * 100).round();
   }
 
   DatingProfile copyWith({
     String? name,
+    String? gender,
     String? city,
     int? age,
     int? height,
@@ -552,6 +547,7 @@ class DatingProfile {
   }) {
     return DatingProfile(
       name: name ?? this.name,
+      gender: gender ?? this.gender,
       city: city ?? this.city,
       age: age ?? this.age,
       height: height ?? this.height,
@@ -567,6 +563,7 @@ class DatingProfile {
 
   Map<String, dynamic> toJson() => {
     'name': name,
+    'gender': gender,
     'city': city,
     'age': age,
     'height': height,
@@ -583,6 +580,7 @@ class DatingProfile {
     if (json == null) return DatingProfile.empty();
     return DatingProfile(
       name: json['name']?.toString() ?? '',
+      gender: json['gender']?.toString() ?? '',
       city: json['city']?.toString() ?? '',
       age: int.tryParse(json['age']?.toString() ?? '') ?? 0,
       height: int.tryParse(json['height']?.toString() ?? '') ?? 0,
@@ -819,6 +817,7 @@ class RecommendPage extends StatelessWidget {
     required this.onLike,
     required this.onSkip,
     required this.onOpenFilters,
+    required this.onRefresh,
   });
 
   final List<Candidate> candidates;
@@ -827,6 +826,7 @@ class RecommendPage extends StatelessWidget {
   final ValueChanged<Candidate> onLike;
   final ValueChanged<Candidate> onSkip;
   final VoidCallback onOpenFilters;
+  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -870,8 +870,54 @@ class RecommendPage extends StatelessWidget {
           ),
         ),
         if (candidates.isEmpty)
-          const SliverToBoxAdapter(
-            child: EmptyState(text: '暂时没有符合条件的推荐，可以调整筛选条件后再看看。'),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: panelDecoration(),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.search_off_rounded,
+                      size: 36,
+                      color: Color(0xFFE85D75),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      '暂时没有符合条件的推荐',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      '可以调整筛选条件，或刷新后查看最新推荐。',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: onOpenFilters,
+                            icon: const Icon(Icons.tune_rounded),
+                            label: const Text('调整筛选'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: onRefresh,
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('刷新推荐'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           )
         else
           SliverPadding(
@@ -917,65 +963,7 @@ class CandidateCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            height: 260,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: candidate.colors,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  left: 18,
-                  right: 18,
-                  bottom: 18,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${candidate.name}，${candidate.age}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          if (candidate.verified)
-                            const Icon(
-                              Icons.verified_rounded,
-                              color: Colors.white,
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '${candidate.city} · ${candidate.height}cm · ${candidate.education} · ${candidate.job}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  top: 14,
-                  right: 14,
-                  child: Chip(
-                    label: Text('${candidate.matchScore}% 适配'),
-                    backgroundColor: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _CandidateHero(candidate: candidate),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1030,17 +1018,255 @@ class CandidateCard extends StatelessWidget {
   }
 }
 
+class _CandidateHero extends StatelessWidget {
+  const _CandidateHero({required this.candidate});
+
+  final Candidate candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = candidate.name.characters.take(1).toString();
+
+    return SizedBox(
+      height: 270,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: candidate.colors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+          ),
+          CustomPaint(painter: _CandidatePatternPainter(candidate.colors.last)),
+          Positioned(
+            top: 28,
+            left: 24,
+            child: Container(
+              width: 118,
+              height: 118,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.18),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.36),
+                  width: 1.2,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 54,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 14,
+            right: 14,
+            child: _ScoreBadge(score: candidate.matchScore),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.transparent,
+                    const Color(0xFF130F18).withValues(alpha: 0.78),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 18,
+            right: 18,
+            bottom: 18,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${candidate.name}，${candidate.age}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 29,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                    ),
+                    if (candidate.verified)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.verified_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              '已认证',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  '${candidate.city} · ${candidate.height}cm · ${candidate.education} · ${candidate.job}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFF8FAFC),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScoreBadge extends StatelessWidget {
+  const _ScoreBadge({required this.score});
+
+  final int score;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(99),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x26000000),
+            blurRadius: 16,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.auto_awesome_rounded,
+            color: Color(0xFFE85D75),
+            size: 16,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            '$score% 适配',
+            style: const TextStyle(
+              color: Color(0xFF18151F),
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CandidatePatternPainter extends CustomPainter {
+  const _CandidatePatternPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.10)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    for (var i = 0; i < 5; i++) {
+      canvas.drawCircle(
+        Offset(size.width * (0.78 + i * 0.04), size.height * (0.12 + i * 0.08)),
+        42 + i * 24,
+        paint,
+      );
+    }
+    final accent = Paint()
+      ..color = color.withValues(alpha: 0.22)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(
+      Offset(size.width * 0.86, size.height * 0.62),
+      84,
+      accent,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CandidatePatternPainter oldDelegate) {
+    return oldDelegate.color != color;
+  }
+}
+
+const _cityOptions = [
+  '上海',
+  '杭州',
+  '苏州',
+  '南京',
+  '北京',
+  '广州',
+  '深圳',
+  '成都',
+  '武汉',
+  '其他',
+];
+const _educationOptions = ['高中及以下', '大专', '本科', '硕士', '博士'];
+const _incomeOptions = ['5万以下', '5-10万', '10-20万', '20-30万', '30-50万', '50万以上'];
+const _marriageOptions = ['未婚', '离异', '丧偶'];
+const _intentionOptions = ['认真婚恋', '一年内结婚', '以结婚为前提', '稳定关系', '先交朋友', '随缘'];
+
+String? _validOption(String value, List<String> options) =>
+    options.contains(value) ? value : null;
+
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
     super.key,
     required this.profile,
+    required this.token,
     required this.onSave,
-    required this.onAddPhoto,
   });
 
   final DatingProfile profile;
+  final String token;
   final ValueChanged<DatingProfile> onSave;
-  final VoidCallback onAddPhoto;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -1050,214 +1276,415 @@ class _ProfilePageState extends State<ProfilePage> {
   late final TextEditingController _name = TextEditingController(
     text: widget.profile.name,
   );
-  late final TextEditingController _city = TextEditingController(
-    text: widget.profile.city,
-  );
   late final TextEditingController _age = TextEditingController(
-    text: widget.profile.age.toString(),
+    text: widget.profile.age == 0 ? '' : widget.profile.age.toString(),
   );
   late final TextEditingController _height = TextEditingController(
-    text: widget.profile.height.toString(),
-  );
-  late final TextEditingController _education = TextEditingController(
-    text: widget.profile.education,
+    text: widget.profile.height == 0 ? '' : widget.profile.height.toString(),
   );
   late final TextEditingController _job = TextEditingController(
     text: widget.profile.job,
-  );
-  late final TextEditingController _income = TextEditingController(
-    text: widget.profile.income,
-  );
-  late final TextEditingController _marriage = TextEditingController(
-    text: widget.profile.marriage,
-  );
-  late final TextEditingController _intention = TextEditingController(
-    text: widget.profile.intention,
   );
   late final TextEditingController _bio = TextEditingController(
     text: widget.profile.bio,
   );
 
-  @override
-  void didUpdateWidget(covariant ProfilePage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.profile != widget.profile) {
-      _name.text = widget.profile.name;
-      _city.text = widget.profile.city;
-      _age.text = widget.profile.age.toString();
-      _height.text = widget.profile.height.toString();
-      _education.text = widget.profile.education;
-      _job.text = widget.profile.job;
-      _income.text = widget.profile.income;
-      _marriage.text = widget.profile.marriage;
-      _intention.text = widget.profile.intention;
-      _bio.text = widget.profile.bio;
-    }
-  }
+  late String? _gender = widget.profile.gender.isEmpty
+      ? null
+      : widget.profile.gender;
+  late String? _city = _validOption(widget.profile.city, _cityOptions);
+  late String? _education = _validOption(
+    widget.profile.education,
+    _educationOptions,
+  );
+  late String? _income = _validOption(widget.profile.income, _incomeOptions);
+  late String? _marriage = _validOption(
+    widget.profile.marriage,
+    _marriageOptions,
+  );
+  late String? _intention = _validOption(
+    widget.profile.intention,
+    _intentionOptions,
+  );
+
+  late List<ProfilePhoto> _photos = List.from(widget.profile.photos);
+  bool _addingPhoto = false;
+  bool _saving = false;
 
   @override
   void dispose() {
     _name.dispose();
-    _city.dispose();
     _age.dispose();
     _height.dispose();
-    _education.dispose();
     _job.dispose();
-    _income.dispose();
-    _marriage.dispose();
-    _intention.dispose();
     _bio.dispose();
     super.dispose();
   }
 
-  void _save() {
-    widget.onSave(
-      widget.profile.copyWith(
-        name: _name.text.trim(),
-        city: _city.text.trim(),
-        age: int.tryParse(_age.text.trim()) ?? widget.profile.age,
-        height: int.tryParse(_height.text.trim()) ?? widget.profile.height,
-        education: _education.text.trim(),
-        job: _job.text.trim(),
-        income: _income.text.trim(),
-        marriage: _marriage.text.trim(),
-        intention: _intention.text.trim(),
-        bio: _bio.text.trim(),
+  DatingProfile _currentProfile() => widget.profile.copyWith(
+    name: _name.text.trim(),
+    gender: _gender ?? '',
+    city: _city ?? '',
+    age: int.tryParse(_age.text.trim()) ?? widget.profile.age,
+    height: int.tryParse(_height.text.trim()) ?? widget.profile.height,
+    education: _education ?? '',
+    job: _job.text.trim(),
+    income: _income ?? '',
+    marriage: _marriage ?? '',
+    intention: _intention ?? '',
+    bio: _bio.text.trim(),
+    photos: _photos,
+  );
+
+  Future<void> _addPhoto() async {
+    setState(() => _addingPhoto = true);
+    try {
+      final nextIndex = _photos.length + 1;
+      final resp = await ApiClient().post('/api/mobile/photos', {
+        'label': '个人照片 $nextIndex',
+      }, token: widget.token);
+      final data = resp['data'] as Map<String, dynamic>? ?? {};
+      if (!mounted) return;
+      setState(() => _photos = [..._photos, ProfilePhoto.fromJson(data)]);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('添加照片失败：$e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _addingPhoto = false);
+    }
+  }
+
+  Future<void> _deletePhoto(ProfilePhoto photo) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除照片'),
+        content: Text('确定删除「${photo.label}」吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
       ),
     );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ApiClient().delete(
+        '/api/mobile/photos/${photo.id}',
+        token: widget.token,
+      );
+      if (!mounted) return;
+      setState(() => _photos = _photos.where((p) => p.id != photo.id).toList());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('删除失败：$e'), behavior: SnackBarBehavior.floating),
+      );
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      widget.onSave(_currentProfile());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final current = _currentProfile();
     return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
       children: [
         const PageHeader(
           title: '个人资料',
           subtitle: '完善真实资料和照片认证，让推荐更准确，也让对方更放心。',
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            children: [
-              ProfileCompletionCard(profile: widget.profile),
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: panelDecoration(),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _name,
-                      decoration: const InputDecoration(labelText: '昵称'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _city,
-                      decoration: const InputDecoration(labelText: '常住城市'),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _age,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(labelText: '年龄'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: _height,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: '身高 cm',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _education,
-                      decoration: const InputDecoration(labelText: '最高学历'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _job,
-                      decoration: const InputDecoration(labelText: '职业'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _income,
-                      decoration: const InputDecoration(labelText: '收入区间'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _marriage,
-                      decoration: const InputDecoration(labelText: '婚姻状态'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _intention,
-                      decoration: const InputDecoration(labelText: '期待关系'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _bio,
-                      maxLines: 3,
-                      decoration: const InputDecoration(labelText: '自我介绍'),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        const Text(
-                          '照片认证',
-                          style: TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                        const Spacer(),
-                        IconButton.filledTonal(
-                          onPressed: widget.onAddPhoto,
-                          icon: const Icon(Icons.add_photo_alternate_rounded),
-                          tooltip: '上传照片',
-                        ),
-                      ],
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: widget.profile.photos
-                            .map((photo) => PhotoTile(photo: photo))
-                            .toList(),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    FilledButton.icon(
-                      onPressed: _save,
-                      icon: const Icon(Icons.save_rounded),
-                      label: const Text('保存并更新推荐'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                    ),
-                  ],
+        ProfileCompletionCard(profile: current),
+        const SizedBox(height: 14),
+        _ProfileSection(
+          title: '基本信息',
+          children: [
+            TextField(
+              controller: _name,
+              decoration: const InputDecoration(labelText: '昵称'),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              '性别',
+              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 8),
+            _GenderSelector(
+              value: _gender,
+              onChanged: (v) => setState(() => _gender = v),
+            ),
+            const SizedBox(height: 14),
+            InputDecorator(
+              decoration: const InputDecoration(labelText: '常住城市'),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _city,
+                  hint: const Text('请选择'),
+                  isExpanded: true,
+                  isDense: true,
+                  items: _cityOptions
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _city = v),
                 ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _age,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: '年龄'),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: TextField(
+                    controller: _height,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: '身高 cm'),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        _ProfileSection(
+          title: '工作情况',
+          children: [
+            InputDecorator(
+              decoration: const InputDecoration(labelText: '最高学历'),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _education,
+                  hint: const Text('请选择'),
+                  isExpanded: true,
+                  isDense: true,
+                  items: _educationOptions
+                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _education = v),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _job,
+              decoration: const InputDecoration(labelText: '职业'),
+            ),
+            const SizedBox(height: 14),
+            InputDecorator(
+              decoration: const InputDecoration(labelText: '年收入区间'),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _income,
+                  hint: const Text('请选择'),
+                  isExpanded: true,
+                  isDense: true,
+                  items: _incomeOptions
+                      .map((i) => DropdownMenuItem(value: i, child: Text(i)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _income = v),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        _ProfileSection(
+          title: '婚恋信息',
+          children: [
+            InputDecorator(
+              decoration: const InputDecoration(labelText: '婚姻状况'),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _marriage,
+                  hint: const Text('请选择'),
+                  isExpanded: true,
+                  isDense: true,
+                  items: _marriageOptions
+                      .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _marriage = v),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            InputDecorator(
+              decoration: const InputDecoration(labelText: '期待关系'),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _intention,
+                  hint: const Text('请选择'),
+                  isExpanded: true,
+                  isDense: true,
+                  items: _intentionOptions
+                      .map((i) => DropdownMenuItem(value: i, child: Text(i)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _intention = v),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        _ProfileSection(
+          title: '自我介绍',
+          children: [
+            TextField(
+              controller: _bio,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                hintText: '介绍一下自己的生活状态、兴趣爱好或择偶期望……',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        _ProfileSection(
+          title: '照片认证',
+          trailing: _addingPhoto
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : IconButton.filledTonal(
+                  onPressed: _addPhoto,
+                  icon: const Icon(Icons.add_photo_alternate_rounded),
+                  tooltip: '添加照片',
+                ),
+          children: [
+            const Text(
+              '上传照片后需等待管理员审核，通过后将显示认证标识。',
+              style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 12),
+            if (_photos.isEmpty)
+              const Text(
+                '暂无照片，点击右上角添加',
+                style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+              )
+            else
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _photos
+                    .map(
+                      (photo) => PhotoTile(
+                        photo: photo,
+                        onDelete: () => _deletePhoto(photo),
+                      ),
+                    )
+                    .toList(),
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: _saving ? null : _save,
+          icon: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.save_rounded),
+          label: const Text('保存并更新推荐'),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
         ),
       ],
     );
   }
 }
 
-class ProfileCompletionCard extends StatelessWidget {
-  const ProfileCompletionCard({super.key, required this.profile});
+class _GenderSelector extends StatelessWidget {
+  const _GenderSelector({required this.value, required this.onChanged});
 
-  final DatingProfile profile;
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const options = ['男', '女', '不透露'];
+    return Row(
+      children: options.map((opt) {
+        final selected = value == opt;
+        return Padding(
+          padding: const EdgeInsets.only(right: 10),
+          child: GestureDetector(
+            onTap: () => onChanged(selected ? null : opt),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFFE85D75)
+                    : const Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(99),
+                border: Border.all(
+                  color: selected
+                      ? const Color(0xFFE85D75)
+                      : const Color(0xFFE5E7EB),
+                ),
+              ),
+              child: Text(
+                opt,
+                style: TextStyle(
+                  color: selected ? Colors.white : const Color(0xFF374151),
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _ProfileSection extends StatelessWidget {
+  const _ProfileSection({
+    required this.title,
+    required this.children,
+    this.trailing,
+  });
+
+  final String title;
+  final List<Widget> children;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -1269,33 +1696,99 @@ class ProfileCompletionCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const Spacer(),
+              ?trailing,
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
+class ProfileCompletionCard extends StatelessWidget {
+  const ProfileCompletionCard({super.key, required this.profile});
+
+  final DatingProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = [
+      if (profile.city.isNotEmpty) InfoPill(label: profile.city),
+      if (profile.age > 0) InfoPill(label: '${profile.age}岁'),
+      if (profile.height > 0) InfoPill(label: '${profile.height}cm'),
+      if (profile.intention.isNotEmpty) InfoPill(label: profile.intention),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2F3A56), Color(0xFFE85D75)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22E85D75),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
               const Icon(
                 Icons.assignment_turned_in_rounded,
-                color: Color(0xFFE85D75),
+                color: Colors.white,
               ),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
                   '资料完整度',
-                  style: TextStyle(fontWeight: FontWeight.w900),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
-              Text('${profile.completion}%'),
+              Text(
+                '${profile.completion}%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
-          LinearProgressIndicator(value: profile.completion / 100),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              InfoPill(label: profile.city),
-              InfoPill(label: '${profile.age}岁'),
-              InfoPill(label: '${profile.height}cm'),
-              InfoPill(label: profile.intention),
-            ],
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: profile.completion / 100,
+              minHeight: 8,
+              color: Colors.white,
+              backgroundColor: Colors.white.withValues(alpha: 0.22),
+            ),
           ),
+          if (chips.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: chips),
+          ],
         ],
       ),
     );
@@ -1303,49 +1796,78 @@ class ProfileCompletionCard extends StatelessWidget {
 }
 
 class PhotoTile extends StatelessWidget {
-  const PhotoTile({super.key, required this.photo});
+  const PhotoTile({super.key, required this.photo, this.onDelete});
 
   final ProfilePhoto photo;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 104,
-      height: 116,
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFEEF2),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFF2C4CD)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.image_rounded, color: Color(0xFFE85D75)),
-          const SizedBox(height: 6),
-          Text(
-            photo.label,
-            style: const TextStyle(fontSize: 12),
-            textAlign: TextAlign.center,
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 104,
+          height: 116,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFEEF2),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFF2C4CD)),
           ),
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(
-              color: photo.status.color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(99),
-            ),
-            child: Text(
-              photo.status.label,
-              style: TextStyle(
-                fontSize: 11,
-                color: photo.status.color,
-                fontWeight: FontWeight.w700,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.image_rounded, color: Color(0xFFE85D75)),
+              const SizedBox(height: 6),
+              Text(
+                photo.label,
+                style: const TextStyle(fontSize: 12),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: photo.status.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  photo.status.label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: photo.status.color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (onDelete != null)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: GestureDetector(
+              onTap: onDelete,
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFDC2626),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.close_rounded,
+                  color: Colors.white,
+                  size: 13,
+                ),
               ),
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -1779,13 +2301,31 @@ class PersonTile extends StatelessWidget {
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    backgroundColor: candidate.colors.last,
-                    child: Text(
-                      candidate.name.characters.first,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: candidate.colors,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x1A111827),
+                          blurRadius: 12,
+                          offset: Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Text(
+                        candidate.name.characters.first,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                     ),
                   ),
@@ -1922,31 +2462,43 @@ class PageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF111827),
-                  ),
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFFE85D75), width: 4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF111827),
+                        letterSpacing: 0,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  subtitle,
-                  style: const TextStyle(color: Color(0xFF6B7280), height: 1.5),
-                ),
-              ],
-            ),
+              ),
+              ?action,
+            ],
           ),
-          ?action,
-        ],
+        ),
       ),
     );
   }
@@ -1966,9 +2518,30 @@ class EmptyState extends StatelessWidget {
         decoration: panelDecoration(),
         child: Row(
           children: [
-            const Icon(Icons.info_outline_rounded, color: Color(0xFFE85D75)),
-            const SizedBox(width: 10),
-            Expanded(child: Text(text)),
+            Container(
+              width: 38,
+              height: 38,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFE5EA),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.auto_awesome_rounded,
+                color: Color(0xFFE85D75),
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(
+                  color: Color(0xFF374151),
+                  height: 1.45,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1980,9 +2553,13 @@ BoxDecoration panelDecoration() {
   return BoxDecoration(
     color: Colors.white,
     borderRadius: BorderRadius.circular(8),
-    border: Border.all(color: const Color(0xFFE7E2DE)),
+    border: Border.all(color: const Color(0xFFEFE3DE)),
     boxShadow: const [
-      BoxShadow(color: Color(0x0F111827), blurRadius: 16, offset: Offset(0, 8)),
+      BoxShadow(
+        color: Color(0x1018151F),
+        blurRadius: 22,
+        offset: Offset(0, 10),
+      ),
     ],
   );
 }

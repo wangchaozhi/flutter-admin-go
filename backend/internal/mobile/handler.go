@@ -24,6 +24,7 @@ type loginRequest struct {
 
 type profilePayload struct {
 	Name      string `json:"name"`
+	Gender    string `json:"gender"`
 	City      string `json:"city"`
 	Age       int    `json:"age"`
 	Height    int    `json:"height"`
@@ -63,6 +64,7 @@ type profileDTO struct {
 	UserID     int        `json:"userId"`
 	Username   string     `json:"username,omitempty"`
 	Name       string     `json:"name"`
+	Gender     string     `json:"gender"`
 	City       string     `json:"city"`
 	Age        int        `json:"age"`
 	Height     int        `json:"height"`
@@ -152,7 +154,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		record := store.MobileProfile{
-			UserID: user.ID, Name: req.Name, City: req.City, Age: req.Age, Height: req.Height,
+			UserID: user.ID, Name: req.Name, Gender: req.Gender, City: req.City, Age: req.Age, Height: req.Height,
 			Education: req.Education, Job: req.Job, Income: req.Income, Marriage: req.Marriage,
 			Intention: req.Intention, Bio: req.Bio,
 		}
@@ -204,6 +206,34 @@ func PhotosHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	invalidateRecommendationCache()
 	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: toPhotoDTO(photo)})
+}
+
+func DeletePhotoHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := currentUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodDelete {
+		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
+		return
+	}
+	rawID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/mobile/photos/"), "/")
+	photoID, err := strconv.Atoi(rawID)
+	if err != nil || photoID <= 0 {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid photo id"})
+		return
+	}
+	result := store.DB().Where("id = ? AND user_id = ?", photoID, user.ID).Delete(&store.MobilePhoto{})
+	if result.Error != nil {
+		common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: result.Error.Error()})
+		return
+	}
+	if result.RowsAffected == 0 {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "photo not found"})
+		return
+	}
+	invalidateRecommendationCache()
+	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok"})
 }
 
 func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
@@ -454,8 +484,8 @@ func buildProfileDTO(userID int, includePhotos bool) (profileDTO, error) {
 		return profileDTO{}, err
 	}
 	dto := profileDTO{
-		UserID: userID, Username: user.Username, Name: profile.Name, City: profile.City, Age: profile.Age,
-		Height: profile.Height, Education: profile.Education, Job: profile.Job, Income: profile.Income,
+		UserID: userID, Username: user.Username, Name: profile.Name, Gender: profile.Gender, City: profile.City,
+		Age: profile.Age, Height: profile.Height, Education: profile.Education, Job: profile.Job, Income: profile.Income,
 		Marriage: profile.Marriage, Intention: profile.Intention, Bio: profile.Bio,
 	}
 	if includePhotos {
@@ -595,7 +625,7 @@ func toPhotoDTO(photo store.MobilePhoto) photoDTO {
 
 func completion(profile profileDTO) int {
 	fields := []string{
-		profile.Name, profile.City, strconv.Itoa(profile.Age), strconv.Itoa(profile.Height),
+		profile.Name, profile.Gender, profile.City, strconv.Itoa(profile.Age), strconv.Itoa(profile.Height),
 		profile.Education, profile.Job, profile.Income, profile.Marriage, profile.Intention, profile.Bio,
 	}
 	filled := 0
@@ -607,7 +637,7 @@ func completion(profile profileDTO) int {
 	if len(profile.Photos) > 0 {
 		filled++
 	}
-	return filled * 100 / 11
+	return filled * 100 / 12
 }
 
 func writeResult(w http.ResponseWriter, data interface{}, err error) {

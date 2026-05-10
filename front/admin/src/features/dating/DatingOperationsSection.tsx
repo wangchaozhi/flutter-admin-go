@@ -1,6 +1,6 @@
-import { CheckCircle2, MessageSquareText, RefreshCw, UserRoundCheck, XCircle } from 'lucide-react'
+import { CheckCircle2, MessageSquareText, RefreshCw, Trash2, UserRoundCheck, XCircle, KeyRound } from 'lucide-react'
 
-import type { DatingMatch, DatingMessage, DatingPhoto, DatingSettings, DatingUser } from '../../adminTypes'
+import type { DatingMatch, DatingMessage, DatingPhoto, DatingSettings, DatingUser, MobileAccount } from '../../adminTypes'
 import { PanelTitle } from '../../components/shared'
 
 const statusLabel: Record<DatingPhoto['status'], string> = {
@@ -15,6 +15,7 @@ export function DatingOperationsSection({
   matches,
   messages,
   settings,
+  mobileAccounts,
   saving,
   canReview,
   selectedMatchId,
@@ -22,12 +23,16 @@ export function DatingOperationsSection({
   onReviewPhoto,
   onSettingsChange,
   onSelectMatch,
+  onDeleteMatch,
+  onDeleteMobileUser,
+  onResetMobilePassword,
 }: {
   users: DatingUser[]
   photos: DatingPhoto[]
   matches: DatingMatch[]
   messages: DatingMessage[]
   settings: DatingSettings
+  mobileAccounts: MobileAccount[]
   saving: boolean
   canReview: boolean
   selectedMatchId: number | null
@@ -35,6 +40,9 @@ export function DatingOperationsSection({
   onReviewPhoto: (id: number, status: DatingPhoto['status']) => void
   onSettingsChange: (settings: DatingSettings) => void
   onSelectMatch: (id: number) => void
+  onDeleteMatch: (id: number) => void
+  onDeleteMobileUser: (id: number) => void
+  onResetMobilePassword: (id: number, password: string) => void
 }) {
   const pendingPhotos = photos.filter((photo) => photo.status === 'pending')
 
@@ -52,6 +60,7 @@ export function DatingOperationsSection({
             <thead>
               <tr>
                 <th>用户</th>
+                <th>性别</th>
                 <th>基础资料</th>
                 <th>意向</th>
                 <th>完整度</th>
@@ -64,6 +73,7 @@ export function DatingOperationsSection({
                     <strong>{user.name || user.username}</strong>
                     <small>{user.username}</small>
                   </td>
+                  <td>{user.gender || '-'}</td>
                   <td>
                     {user.city} · {user.age}岁 · {user.height}cm · {user.education}
                     <small>{user.job}</small>
@@ -72,7 +82,9 @@ export function DatingOperationsSection({
                     {user.intention}
                     <small>{user.marriage} · {user.income}</small>
                   </td>
-                  <td>{user.completion}%</td>
+                  <td>
+                    <CompletionBadge value={user.completion} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -131,21 +143,37 @@ export function DatingOperationsSection({
         <div className="match-layout">
           <div className="match-list">
             {matches.map((match) => (
-              <button
-                className={selectedMatchId === match.id ? 'match-item active' : 'match-item'}
-                key={match.id}
-                type="button"
-                onClick={() => onSelectMatch(match.id)}
-              >
-                <strong>{match.userA} / {match.userB}</strong>
-                <span>{match.messages} 条消息</span>
-              </button>
+              <div key={match.id} className="match-item-row">
+                <button
+                  className={selectedMatchId === match.id ? 'match-item active' : 'match-item'}
+                  type="button"
+                  onClick={() => onSelectMatch(match.id)}
+                >
+                  <strong>{match.userA} / {match.userB}</strong>
+                  <span>{match.messages} 条消息</span>
+                </button>
+                {canReview && (
+                  <button
+                    className="icon-button danger"
+                    disabled={saving}
+                    title="删除匹配"
+                    type="button"
+                    onClick={() => onDeleteMatch(match.id)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
             ))}
+            {matches.length === 0 && <p className="empty">暂无匹配</p>}
           </div>
           <div className="message-list">
             {messages.map((message) => (
               <article className="message-card" key={message.id}>
-                <strong>{message.sender}</strong>
+                <div className="message-meta">
+                  <strong>{message.sender}</strong>
+                  <time>{formatTime(message.createdAt)}</time>
+                </div>
                 <p>{message.content}</p>
               </article>
             ))}
@@ -153,7 +181,96 @@ export function DatingOperationsSection({
           </div>
         </div>
       </section>
+
+      <section className="table-panel dating-span">
+        <PanelTitle title="移动端账号管理" count={mobileAccounts.length} />
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>手机号 / 账号</th>
+                <th>昵称</th>
+                <th>资料状态</th>
+                <th>完整度</th>
+                {canReview && <th>操作</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {mobileAccounts.map((account) => (
+                <tr key={account.userId}>
+                  <td>{account.username}</td>
+                  <td>{account.nickname || '-'}</td>
+                  <td>{account.hasProfile ? '已创建' : '未创建'}</td>
+                  <td>
+                    {account.hasProfile
+                      ? <CompletionBadge value={account.completion} />
+                      : <span style={{ color: 'var(--text-subtle)' }}>-</span>}
+                  </td>
+                  {canReview && (
+                    <td>
+                      <div className="row-actions">
+                        <ResetPasswordButton
+                          disabled={saving}
+                          onReset={(password) => onResetMobilePassword(account.userId, password)}
+                        />
+                        <button
+                          className="danger"
+                          disabled={saving}
+                          type="button"
+                          onClick={() => onDeleteMobileUser(account.userId)}
+                        >
+                          <Trash2 size={13} />
+                          删除账号
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {mobileAccounts.length === 0 && (
+                <tr>
+                  <td colSpan={canReview ? 5 : 4} style={{ textAlign: 'center', color: 'var(--text-subtle)' }}>
+                    暂无移动端用户
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
+  )
+}
+
+function ResetPasswordButton({
+  disabled,
+  onReset,
+}: {
+  disabled: boolean
+  onReset: (password: string) => void
+}) {
+  function handleClick() {
+    const password = window.prompt('请输入新密码（至少6位）')
+    if (!password) return
+    if (password.length < 6) {
+      alert('密码至少需要6位')
+      return
+    }
+    onReset(password)
+  }
+
+  return (
+    <button disabled={disabled} type="button" onClick={handleClick}>
+      <KeyRound size={13} />
+      重置密码
+    </button>
+  )
+}
+
+function CompletionBadge({ value }: { value: number }) {
+  const color = value >= 80 ? '#059669' : value >= 50 ? '#D97706' : '#DC2626'
+  return (
+    <span style={{ color, fontWeight: 700 }}>{value}%</span>
   )
 }
 
@@ -173,4 +290,19 @@ function SummaryItem({
       <strong>{value}</strong>
     </div>
   )
+}
+
+function formatTime(iso: string): string {
+  const date = new Date(iso)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+  const hh = date.getHours().toString().padStart(2, '0')
+  const mm = date.getMinutes().toString().padStart(2, '0')
+  const timeStr = `${hh}:${mm}`
+
+  if (msgDay.getTime() === today.getTime()) return timeStr
+  if (msgDay.getTime() === today.getTime() - 86400000) return `昨天 ${timeStr}`
+  return `${date.getMonth() + 1}/${date.getDate()} ${timeStr}`
 }

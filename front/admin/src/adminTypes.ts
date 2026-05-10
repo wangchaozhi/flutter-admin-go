@@ -75,6 +75,7 @@ export type DatingUser = {
   userId: number
   username: string
   name: string
+  gender: string
   city: string
   age: number
   height: number
@@ -86,6 +87,14 @@ export type DatingUser = {
   bio: string
   completion: number
   photos: DatingPhoto[]
+}
+
+export type MobileAccount = {
+  userId: number
+  username: string
+  nickname: string
+  hasProfile: boolean
+  completion: number
 }
 
 export type DatingMatch = {

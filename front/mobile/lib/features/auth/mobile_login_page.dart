@@ -110,20 +110,13 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
     }
 
     return Scaffold(
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFFFFBF7), Color(0xFFFFEEF2), Color(0xFFF4F8FB)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
+      body: _LoginBackdrop(
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 28),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 430),
+                constraints: BoxConstraints(maxWidth: 430),
                 child: _LoginCard(
                   usernameController: _usernameController,
                   passwordController: _passwordController,
@@ -142,6 +135,60 @@ class _MobileLoginPageState extends State<MobileLoginPage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LoginBackdrop extends StatelessWidget {
+  const _LoginBackdrop({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFFFFFBF8), Color(0xFFFFEEF2), Color(0xFFEFF8F6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -90,
+            right: -80,
+            child: _SoftGlow(size: 220, color: Color(0x33EF9A62)),
+          ),
+          Positioned(
+            left: -80,
+            bottom: 70,
+            child: _SoftGlow(size: 190, color: Color(0x3338B2AC)),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _SoftGlow extends StatelessWidget {
+  const _SoftGlow({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        boxShadow: [BoxShadow(color: color, blurRadius: 80, spreadRadius: 24)],
       ),
     );
   }
@@ -176,11 +223,11 @@ class _LoginCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.white.withValues(alpha: 0.98),
-      elevation: 14,
-      shadowColor: const Color(0x1F0F172A),
+      elevation: 18,
+      shadowColor: const Color(0x240F172A),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -188,6 +235,12 @@ class _LoginCard extends StatelessWidget {
             const LoginHeader(),
             const SizedBox(height: 28),
             SegmentedButton<bool>(
+              style: SegmentedButton.styleFrom(
+                selectedBackgroundColor: const Color(0xFFFFE5EA),
+                selectedForegroundColor: const Color(0xFFE85D75),
+                foregroundColor: const Color(0xFF6B7280),
+                textStyle: const TextStyle(fontWeight: FontWeight.w800),
+              ),
               segments: const [
                 ButtonSegment(value: false, label: Text('登录')),
                 ButtonSegment(value: true, label: Text('注册')),

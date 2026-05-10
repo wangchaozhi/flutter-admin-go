@@ -31,6 +31,7 @@ import type {
   LoginResponse,
   Menu,
   MenuForm,
+  MobileAccount,
   Profile,
   Role,
   RoleForm,
@@ -326,6 +327,7 @@ function AdminDashboard({
   const [datingMatches, setDatingMatches] = useState<DatingMatch[]>([])
   const [datingMessages, setDatingMessages] = useState<DatingMessage[]>([])
   const [datingSettings, setDatingSettings] = useState<DatingSettings>({ photoReviewEnabled: true })
+  const [mobileAccounts, setMobileAccounts] = useState<MobileAccount[]>([])
   const [selectedDatingMatchId, setSelectedDatingMatchId] = useState<number | null>(null)
   const [userForm, setUserForm] = useState<UserForm>(emptyUser)
   const [roleForm, setRoleForm] = useState<RoleForm>(emptyRole)
@@ -376,6 +378,7 @@ function AdminDashboard({
         nextDatingPhotos,
         nextDatingMatches,
         nextDatingSettings,
+        nextMobileAccounts,
       ] = await Promise.all([
         request<User[]>('/api/admin/users'),
         request<Role[]>('/api/admin/roles'),
@@ -384,6 +387,7 @@ function AdminDashboard({
         request<DatingPhoto[]>('/api/admin/dating/photos'),
         request<DatingMatch[]>('/api/admin/dating/matches'),
         request<DatingSettings>('/api/admin/dating/settings'),
+        request<MobileAccount[]>('/api/admin/dating/mobile-users'),
       ])
       setUsers(nextUsers ?? [])
       setRoles(nextRoles ?? [])
@@ -392,6 +396,7 @@ function AdminDashboard({
       setDatingPhotos(nextDatingPhotos ?? [])
       setDatingMatches(nextDatingMatches ?? [])
       setDatingSettings(nextDatingSettings ?? { photoReviewEnabled: true })
+      setMobileAccounts(nextMobileAccounts ?? [])
       if (!selectedDatingMatchId && nextDatingMatches?.[0]) {
         setSelectedDatingMatchId(nextDatingMatches[0].id)
         void loadDatingMessages(nextDatingMatches[0].id)
@@ -427,6 +432,74 @@ function AdminDashboard({
       setNotice('照片审核状态已更新')
     } catch (err) {
       setError(err instanceof Error ? err.message : '照片审核失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteMatch(id: number) {
+    setConfirmDialog({
+      title: '确认删除匹配',
+      message: '删除后双方聊天记录将一并清除，无法恢复，确定删除吗？',
+      confirmLabel: '删除',
+      onConfirm: () => void performDeleteMatch(id),
+    })
+  }
+
+  async function performDeleteMatch(id: number) {
+    setConfirmDialog(null)
+    setSaving(true)
+    setError('')
+    try {
+      await request(`/api/admin/dating/matches/${id}`, { method: 'DELETE' })
+      if (selectedDatingMatchId === id) {
+        setSelectedDatingMatchId(null)
+        setDatingMessages([])
+      }
+      await loadAll()
+      setNotice('匹配已删除')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteMobileUser(id: number) {
+    setConfirmDialog({
+      title: '确认删除账号',
+      message: '删除后该用户的所有资料、照片及聊天记录将被清除，无法恢复。确定删除吗？',
+      confirmLabel: '删除',
+      onConfirm: () => void performDeleteMobileUser(id),
+    })
+  }
+
+  async function performDeleteMobileUser(id: number) {
+    setConfirmDialog(null)
+    setSaving(true)
+    setError('')
+    try {
+      await request(`/api/admin/dating/mobile-users/${id}`, { method: 'DELETE' })
+      await loadAll()
+      setNotice('账号已删除')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function resetMobilePassword(id: number, password: string) {
+    setSaving(true)
+    setError('')
+    try {
+      await request(`/api/admin/dating/mobile-users/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ password }),
+      })
+      setNotice('密码已重置')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重置密码失败')
     } finally {
       setSaving(false)
     }
@@ -788,6 +861,7 @@ function AdminDashboard({
             matches={datingMatches}
             messages={datingMessages}
             settings={datingSettings}
+            mobileAccounts={mobileAccounts}
             saving={saving}
             canReview={can('dating:review')}
             selectedMatchId={selectedDatingMatchId}
@@ -795,6 +869,9 @@ function AdminDashboard({
             onReviewPhoto={reviewDatingPhoto}
             onSettingsChange={(settings) => void saveDatingSettings(settings)}
             onSelectMatch={(id) => void loadDatingMessages(id)}
+            onDeleteMatch={(id) => void deleteMatch(id)}
+            onDeleteMobileUser={(id) => void deleteMobileUser(id)}
+            onResetMobilePassword={(id, password) => void resetMobilePassword(id, password)}
           />
         )}
       </section>
