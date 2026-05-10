@@ -66,11 +66,37 @@ const emptyMenu: MenuForm = {
   permission: '',
 }
 
-const tabs: Array<{ key: Entity; label: string; icon: typeof Users }> = [
-  { key: 'users', label: '用户', icon: Users },
-  { key: 'roles', label: '角色', icon: Shield },
-  { key: 'menus', label: '菜单', icon: MenuIcon },
-  { key: 'dating', label: '婚恋运营', icon: HeartHandshake },
+type ChildNavItem = {
+  key: Entity
+  label: string
+  icon: typeof Users
+  path: string
+}
+
+type NavItem = {
+  key: Entity | 'dating'
+  label: string
+  icon: typeof Users
+  path: string
+  children?: ChildNavItem[]
+}
+
+const tabs: NavItem[] = [
+  { key: 'users', label: '用户', icon: Users, path: '/system/user' },
+  { key: 'roles', label: '角色', icon: Shield, path: '/system/role' },
+  { key: 'menus', label: '菜单', icon: MenuIcon, path: '/system/menu' },
+  {
+    key: 'dating',
+    label: '婚恋运营',
+    icon: HeartHandshake,
+    path: '/dating',
+    children: [
+      { key: 'dating-users', label: '婚恋用户', icon: Users, path: '/dating/users' },
+      { key: 'dating-photos', label: '照片审核', icon: ImageUp, path: '/dating/photos' },
+      { key: 'dating-matches', label: '匹配与聊天', icon: HeartHandshake, path: '/dating/matches' },
+      { key: 'dating-accounts', label: '移动端账号', icon: KeyRound, path: '/dating/accounts' },
+    ],
+  },
 ]
 
 const adminRememberKey = 'admin.remember'
@@ -99,6 +125,14 @@ function getThemeIcon(theme: ThemeMode) {
 
 function nextTheme(theme: ThemeMode): ThemeMode {
   return themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]
+}
+
+function isDatingSection(active: Entity): active is Extract<Entity, 'dating-users' | 'dating-photos' | 'dating-matches' | 'dating-accounts'> {
+  return active.startsWith('dating-')
+}
+
+function isEntityKey(key: NavItem['key']): key is Entity {
+  return key !== 'dating'
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -358,13 +392,32 @@ function AdminDashboard({
   const visibleTabs = useMemo(
     () =>
       tabs
-        .filter((tab) => tab.key !== 'users' || menuPaths.has('/system/user'))
-        .filter((tab) => tab.key !== 'roles' || menuPaths.has('/system/role'))
-        .filter((tab) => tab.key !== 'menus' || menuPaths.has('/system/menu'))
-        .filter((tab) => tab.key !== 'dating' || menuPaths.has('/dating')),
+        .map((tab) => {
+          if (!tab.children) return tab
+          const children = menuPaths.has(tab.path)
+            ? tab.children
+            : tab.children.filter((child) => menuPaths.has(child.path))
+          return children.length > 0 ? { ...tab, children } : tab
+        })
+        .filter((tab) => menuPaths.has(tab.path) || Boolean(tab.children?.length)),
     [menuPaths],
   )
+  const flatVisibleTabs = useMemo<ChildNavItem[]>(
+    () =>
+      visibleTabs.flatMap((tab) => {
+        if (tab.children?.length) return tab.children
+        return isEntityKey(tab.key) ? [{ key: tab.key, label: tab.label, icon: tab.icon, path: tab.path }] : []
+      }),
+    [visibleTabs],
+  )
   const can = (permission: string) => permissions.has(permission)
+
+  useEffect(() => {
+    if (flatVisibleTabs.length === 0) return
+    if (!flatVisibleTabs.some((tab) => tab.key === active)) {
+      setActive(flatVisibleTabs[0].key)
+    }
+  }, [active, flatVisibleTabs])
 
   async function loadAll() {
     setLoading(true)
@@ -526,12 +579,6 @@ function AdminDashboard({
   useEffect(() => {
     void loadAll()
   }, [])
-
-  useEffect(() => {
-    if (visibleTabs.length > 0 && !visibleTabs.some((tab) => tab.key === active)) {
-      setActive(visibleTabs[0].key)
-    }
-  }, [active, visibleTabs])
 
   useEffect(() => {
     if (!userMenuOpen) return
@@ -738,17 +785,42 @@ function AdminDashboard({
         <nav className="nav-tabs" aria-label="系统管理">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon
+            const children = tab.children ?? []
+            const activeChild = children.some((child) => child.key === active)
             return (
-              <button
-                className={active === tab.key ? 'active' : ''}
-                key={tab.key}
-                type="button"
-                onClick={() => setActive(tab.key)}
-              >
-                <Icon size={16} />
-                <span>{tab.label}</span>
-                <ChevronRight className="nav-chevron" size={15} />
-              </button>
+              <div className="nav-group" key={tab.key}>
+                <button
+                  className={active === tab.key || activeChild ? 'active' : ''}
+                  type="button"
+                  onClick={() => {
+                    if (children[0]) {
+                      setActive(children[0].key)
+                      return
+                    }
+                    if (isEntityKey(tab.key)) {
+                      setActive(tab.key)
+                    }
+                  }}
+                >
+                  <Icon size={16} />
+                  <span>{tab.label}</span>
+                  <ChevronRight className="nav-chevron" size={15} />
+                </button>
+                {children.length > 0 && (
+                  <div className="nav-subtabs">
+                    {children.map((child) => (
+                      <button
+                        className={active === child.key ? 'active' : ''}
+                        key={child.key}
+                        type="button"
+                        onClick={() => setActive(child.key)}
+                      >
+                        <span>{child.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )
           })}
         </nav>
@@ -854,8 +926,9 @@ function AdminDashboard({
           />
         )}
 
-        {active === 'dating' && (
+        {isDatingSection(active) && (
           <DatingOperationsSection
+            section={active}
             users={datingUsers}
             photos={datingPhotos}
             matches={datingMatches}
@@ -872,6 +945,7 @@ function AdminDashboard({
             onDeleteMatch={(id) => void deleteMatch(id)}
             onDeleteMobileUser={(id) => void deleteMobileUser(id)}
             onResetMobilePassword={(id, password) => void resetMobilePassword(id, password)}
+            loadAssetObjectURL={fetchAssetObjectURL}
           />
         )}
       </section>

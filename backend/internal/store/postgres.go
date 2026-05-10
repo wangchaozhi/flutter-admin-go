@@ -137,6 +137,7 @@ type MobilePhoto struct {
 	UserID    int       `gorm:"column:user_id"`
 	Label     string    `gorm:"column:label"`
 	Status    string    `gorm:"column:status"`
+	URL       string    `gorm:"column:url"`
 	CreatedAt time.Time `gorm:"column:created_at"`
 }
 

@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../core/api_client.dart';
@@ -438,17 +440,20 @@ class ProfilePhoto {
     required this.id,
     required this.label,
     required this.status,
+    this.url = '',
   });
 
   final String id;
   final String label;
   final PhotoStatus status;
+  final String url;
 
-  ProfilePhoto copyWith({String? id, String? label, PhotoStatus? status}) {
+  ProfilePhoto copyWith({String? id, String? label, PhotoStatus? status, String? url}) {
     return ProfilePhoto(
       id: id ?? this.id,
       label: label ?? this.label,
       status: status ?? this.status,
+      url: url ?? this.url,
     );
   }
 
@@ -456,6 +461,7 @@ class ProfilePhoto {
     'id': id,
     'label': label,
     'status': status.name,
+    'url': url,
   };
 
   factory ProfilePhoto.fromJson(Map<String, dynamic> json) {
@@ -463,6 +469,7 @@ class ProfilePhoto {
       id: json['id']?.toString() ?? 'photo',
       label: json['label']?.toString() ?? '个人照片',
       status: PhotoStatus.parse(json['status']?.toString()),
+      url: json['url']?.toString() ?? '',
     );
   }
 }
@@ -1337,12 +1344,23 @@ class _ProfilePageState extends State<ProfilePage> {
   );
 
   Future<void> _addPhoto() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+      maxWidth: 1920,
+    );
+    if (picked == null) return;
+
     setState(() => _addingPhoto = true);
     try {
       final nextIndex = _photos.length + 1;
-      final resp = await ApiClient().post('/api/mobile/photos', {
-        'label': '个人照片 $nextIndex',
-      }, token: widget.token);
+      final resp = await ApiClient().uploadPhoto(
+        '/api/mobile/photos',
+        File(picked.path),
+        label: '个人照片 $nextIndex',
+        token: widget.token,
+      );
       final data = resp['data'] as Map<String, dynamic>? ?? {};
       if (!mounted) return;
       setState(() => _photos = [..._photos, ProfilePhoto.fromJson(data)]);
@@ -1350,7 +1368,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('添加照片失败：$e'),
+          content: Text('上传照片失败：$e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1601,6 +1619,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     .map(
                       (photo) => PhotoTile(
                         photo: photo,
+                        token: widget.token,
                         onDelete: () => _deletePhoto(photo),
                       ),
                     )
@@ -1796,10 +1815,11 @@ class ProfileCompletionCard extends StatelessWidget {
 }
 
 class PhotoTile extends StatelessWidget {
-  const PhotoTile({super.key, required this.photo, this.onDelete});
+  const PhotoTile({super.key, required this.photo, this.onDelete, this.token});
 
   final ProfilePhoto photo;
   final VoidCallback? onDelete;
+  final String? token;
 
   @override
   Widget build(BuildContext context) {
@@ -1809,41 +1829,43 @@ class PhotoTile extends StatelessWidget {
         Container(
           width: 104,
           height: 116,
-          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: const Color(0xFFFFEEF2),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: const Color(0xFFF2C4CD)),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.image_rounded, color: Color(0xFFE85D75)),
-              const SizedBox(height: 6),
-              Text(
-                photo.label,
-                style: const TextStyle(fontSize: 12),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          clipBehavior: Clip.antiAlias,
+          child: photo.url.isNotEmpty
+              ? _PhotoImage(url: photo.url, token: token, status: photo.status)
+              : _PhotoPlaceholder(photo: photo),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.45),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+            ),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: photo.status.color.withValues(alpha: 0.12),
+                  color: photo.status.color.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(99),
                 ),
                 child: Text(
                   photo.status.label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: photo.status.color,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Colors.white,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-            ],
+            ),
           ),
         ),
         if (onDelete != null)
@@ -1868,6 +1890,68 @@ class PhotoTile extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _PhotoPlaceholder extends StatelessWidget {
+  const _PhotoPlaceholder({required this.photo});
+
+  final ProfilePhoto photo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 28),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.image_rounded, color: Color(0xFFE85D75)),
+          const SizedBox(height: 6),
+          Text(
+            photo.label,
+            style: const TextStyle(fontSize: 12),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotoImage extends StatelessWidget {
+  const _PhotoImage({required this.url, required this.token, required this.status});
+
+  final String url;
+  final String? token;
+  final PhotoStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final fullUrl = '${ApiClient.baseUrl}$url';
+    return Image.network(
+      fullUrl,
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      headers: {
+        if (token != null && token!.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+      errorBuilder: (context, error, stack) => const Center(
+        child: Icon(Icons.broken_image_rounded, color: Color(0xFFE85D75)),
+      ),
+      loadingBuilder: (_, child, progress) {
+        if (progress == null) return child;
+        return const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      },
     );
   }
 }

@@ -1,4 +1,11 @@
-export type Entity = 'users' | 'roles' | 'menus' | 'dating'
+export type Entity =
+  | 'users'
+  | 'roles'
+  | 'menus'
+  | 'dating-users'
+  | 'dating-photos'
+  | 'dating-matches'
+  | 'dating-accounts'
 
 export type User = {
   id: number
@@ -68,6 +75,7 @@ export type DatingPhoto = {
   name?: string
   label: string
   status: 'pending' | 'approved' | 'rejected'
+  url: string
   createdAt: string
 }
 

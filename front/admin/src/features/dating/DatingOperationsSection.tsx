@@ -1,7 +1,10 @@
-import { CheckCircle2, MessageSquareText, RefreshCw, Trash2, UserRoundCheck, XCircle, KeyRound } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { CheckCircle2, Clock3, Eye, ImageOff, MessageSquareText, RefreshCw, RotateCcw, Trash2, UserRoundCheck, XCircle, KeyRound } from 'lucide-react'
 
-import type { DatingMatch, DatingMessage, DatingPhoto, DatingSettings, DatingUser, MobileAccount } from '../../adminTypes'
+import type { DatingMatch, DatingMessage, DatingPhoto, DatingSettings, DatingUser, Entity, MobileAccount } from '../../adminTypes'
 import { PanelTitle } from '../../components/shared'
+
+type DatingSection = Extract<Entity, 'dating-users' | 'dating-photos' | 'dating-matches' | 'dating-accounts'>
 
 const statusLabel: Record<DatingPhoto['status'], string> = {
   pending: '待审核',
@@ -9,7 +12,15 @@ const statusLabel: Record<DatingPhoto['status'], string> = {
   rejected: '未通过',
 }
 
+const statusOptions: Array<{ value: 'all' | DatingPhoto['status']; label: string }> = [
+  { value: 'pending', label: '待审核' },
+  { value: 'all', label: '全部' },
+  { value: 'approved', label: '已通过' },
+  { value: 'rejected', label: '未通过' },
+]
+
 export function DatingOperationsSection({
+  section,
   users,
   photos,
   matches,
@@ -26,7 +37,9 @@ export function DatingOperationsSection({
   onDeleteMatch,
   onDeleteMobileUser,
   onResetMobilePassword,
+  loadAssetObjectURL,
 }: {
+  section: DatingSection
   users: DatingUser[]
   photos: DatingPhoto[]
   matches: DatingMatch[]
@@ -43,12 +56,26 @@ export function DatingOperationsSection({
   onDeleteMatch: (id: number) => void
   onDeleteMobileUser: (id: number) => void
   onResetMobilePassword: (id: number, password: string) => void
+  loadAssetObjectURL: (url: string) => Promise<string>
 }) {
   const pendingPhotos = photos.filter((photo) => photo.status === 'pending')
+  const [photoStatus, setPhotoStatus] = useState<'all' | DatingPhoto['status']>('pending')
+  const [previewPhoto, setPreviewPhoto] = useState<DatingPhoto | null>(null)
+  const filteredPhotos = useMemo(
+    () => photos.filter((photo) => photoStatus === 'all' || photo.status === photoStatus),
+    [photoStatus, photos],
+  )
+  const approvedCount = photos.filter((photo) => photo.status === 'approved').length
+  const rejectedCount = photos.filter((photo) => photo.status === 'rejected').length
+  const showUsers = section === 'dating-users'
+  const showPhotos = section === 'dating-photos'
+  const showMatches = section === 'dating-matches'
+  const showAccounts = section === 'dating-accounts'
 
   return (
-    <section className="dating-grid">
-      <section className="table-panel">
+    <section className={showPhotos ? 'dating-grid dating-review-page' : 'dating-grid'}>
+      {showUsers && (
+      <section className="table-panel dating-span">
         <PanelTitle title="婚恋用户" count={users.length} />
         <div className="dating-summary">
           <SummaryItem icon={UserRoundCheck} label="资料用户" value={users.length} />
@@ -91,13 +118,20 @@ export function DatingOperationsSection({
           </table>
         </div>
       </section>
+      )}
 
+      {showPhotos && (
       <section className="editor-panel">
         <PanelTitle title="照片审核" count={pendingPhotos.length} />
+        <div className="review-metrics">
+          <SummaryItem icon={Clock3} label="待处理" value={pendingPhotos.length} />
+          <SummaryItem icon={CheckCircle2} label="已通过" value={approvedCount} />
+          <SummaryItem icon={XCircle} label="已拒绝" value={rejectedCount} />
+        </div>
         <label className="setting-row">
           <span>
-            <strong>开启头像审核</strong>
-            <small>{settings.photoReviewEnabled ? '新上传头像需要审核后展示认证' : '新上传头像将直接通过认证'}</small>
+            <strong>开启照片审核</strong>
+            <small>{settings.photoReviewEnabled ? '新上传照片需要审核后展示认证' : '新上传照片将直接通过认证'}</small>
           </span>
           <input
             checked={settings.photoReviewEnabled}
@@ -106,38 +140,73 @@ export function DatingOperationsSection({
             onChange={(event) => onSettingsChange({ photoReviewEnabled: event.target.checked })}
           />
         </label>
-        <button className="ghost-button" type="button" onClick={onRefresh}>
-          <RefreshCw size={15} />
-          刷新运营数据
-        </button>
+        <div className="review-toolbar">
+          <div className="segmented-tabs" role="tablist" aria-label="照片审核状态">
+            {statusOptions.map((option) => (
+              <button
+                className={photoStatus === option.value ? 'active' : ''}
+                key={option.value}
+                type="button"
+                onClick={() => setPhotoStatus(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <button className="ghost-button" type="button" onClick={onRefresh}>
+            <RefreshCw size={15} />
+            刷新
+          </button>
+        </div>
         <div className="review-list">
-          {photos.map((photo) => (
+          {filteredPhotos.map((photo) => (
             <article className="review-card" key={photo.id}>
-              <div className="review-thumb">
-                <span>{photo.label.slice(0, 1)}</span>
-              </div>
-              <div>
+              <button
+                className="review-thumb"
+                disabled={!photo.url}
+                type="button"
+                onClick={() => setPreviewPhoto(photo)}
+              >
+                <PhotoThumb photo={photo} loadAssetObjectURL={loadAssetObjectURL} />
+                <span className={`review-status ${photo.status}`}>{statusLabel[photo.status]}</span>
+                {photo.url && (
+                  <span className="review-view">
+                    <Eye size={14} />
+                  </span>
+                )}
+              </button>
+              <div className="review-copy">
                 <strong>{photo.name || photo.username}</strong>
-                <small>{photo.label} · {statusLabel[photo.status]}</small>
+                <small>{photo.username || `用户 ${photo.userId}`}</small>
+                <span>{photo.label}</span>
+                <time>{formatTime(photo.createdAt)}</time>
               </div>
               {canReview && (
                 <div className="row-actions">
-                  <button disabled={saving} type="button" onClick={() => onReviewPhoto(photo.id, 'approved')}>
+                  <button disabled={saving || photo.status === 'approved'} type="button" onClick={() => onReviewPhoto(photo.id, 'approved')}>
                     <CheckCircle2 size={14} />
                     通过
                   </button>
-                  <button className="danger" disabled={saving} type="button" onClick={() => onReviewPhoto(photo.id, 'rejected')}>
+                  <button className="danger" disabled={saving || photo.status === 'rejected'} type="button" onClick={() => onReviewPhoto(photo.id, 'rejected')}>
                     <XCircle size={14} />
                     拒绝
                   </button>
+                  {photo.status !== 'pending' && (
+                    <button disabled={saving} type="button" onClick={() => onReviewPhoto(photo.id, 'pending')}>
+                      <RotateCcw size={14} />
+                      退回待审
+                    </button>
+                  )}
                 </div>
               )}
             </article>
           ))}
-          {photos.length === 0 && <p className="empty">暂无照片</p>}
+          {filteredPhotos.length === 0 && <p className="empty">暂无{photoStatus === 'all' ? '' : statusLabel[photoStatus]}照片</p>}
         </div>
       </section>
+      )}
 
+      {showMatches && (
       <section className="table-panel dating-span">
         <PanelTitle title="匹配与聊天" count={matches.length} />
         <div className="match-layout">
@@ -181,7 +250,9 @@ export function DatingOperationsSection({
           </div>
         </div>
       </section>
+      )}
 
+      {showAccounts && (
       <section className="table-panel dating-span">
         <PanelTitle title="移动端账号管理" count={mobileAccounts.length} />
         <div className="table-wrap">
@@ -238,7 +309,117 @@ export function DatingOperationsSection({
           </table>
         </div>
       </section>
+      )}
+
+      {previewPhoto && (
+        <PhotoPreviewDialog
+          canReview={canReview}
+          photo={previewPhoto}
+          saving={saving}
+          loadAssetObjectURL={loadAssetObjectURL}
+          onClose={() => setPreviewPhoto(null)}
+          onReviewPhoto={onReviewPhoto}
+        />
+      )}
     </section>
+  )
+}
+
+function PhotoThumb({
+  photo,
+  loadAssetObjectURL,
+}: {
+  photo: DatingPhoto
+  loadAssetObjectURL: (url: string) => Promise<string>
+}) {
+  const [src, setSrc] = useState('')
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    let objectURL = ''
+    setSrc('')
+    setFailed(false)
+    if (!photo.url) return
+    loadAssetObjectURL(`/api/admin/dating/photos/assets/${photo.id}`)
+      .then((url) => {
+        if (!alive) {
+          URL.revokeObjectURL(url)
+          return
+        }
+        objectURL = url
+        setSrc(url)
+      })
+      .catch(() => {
+        if (alive) setFailed(true)
+      })
+    return () => {
+      alive = false
+      if (objectURL) URL.revokeObjectURL(objectURL)
+    }
+  }, [loadAssetObjectURL, photo.id, photo.url])
+
+  if (src) return <img alt={photo.label} src={src} />
+  if (failed || !photo.url) {
+    return (
+      <span className="review-placeholder">
+        <ImageOff size={22} />
+      </span>
+    )
+  }
+  return <span className="review-placeholder">{photo.label.slice(0, 1)}</span>
+}
+
+function PhotoPreviewDialog({
+  photo,
+  saving,
+  canReview,
+  loadAssetObjectURL,
+  onClose,
+  onReviewPhoto,
+}: {
+  photo: DatingPhoto
+  saving: boolean
+  canReview: boolean
+  loadAssetObjectURL: (url: string) => Promise<string>
+  onClose: () => void
+  onReviewPhoto: (id: number, status: DatingPhoto['status']) => void
+}) {
+  return (
+    <div className="photo-preview-backdrop" role="presentation" onMouseDown={onClose}>
+      <div className="photo-preview-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="photo-preview-header">
+          <div>
+            <strong>{photo.name || photo.username}</strong>
+            <small>{photo.label} · {statusLabel[photo.status]}</small>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose}>
+            <XCircle size={16} />
+          </button>
+        </div>
+        <div className="photo-preview-body">
+          <PhotoThumb photo={photo} loadAssetObjectURL={loadAssetObjectURL} />
+        </div>
+        {canReview && (
+          <div className="photo-preview-actions">
+            <button disabled={saving || photo.status === 'approved'} type="button" onClick={() => onReviewPhoto(photo.id, 'approved')}>
+              <CheckCircle2 size={14} />
+              通过
+            </button>
+            <button className="danger" disabled={saving || photo.status === 'rejected'} type="button" onClick={() => onReviewPhoto(photo.id, 'rejected')}>
+              <XCircle size={14} />
+              拒绝
+            </button>
+            {photo.status !== 'pending' && (
+              <button disabled={saving} type="button" onClick={() => onReviewPhoto(photo.id, 'pending')}>
+                <RotateCcw size={14} />
+                退回待审
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

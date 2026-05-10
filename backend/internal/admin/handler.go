@@ -796,6 +796,14 @@ func menuPermissionCode(path string) string {
 		return "system:menu"
 	case "/dating":
 		return "dating"
+	case "/dating/users":
+		return "dating:users"
+	case "/dating/photos":
+		return "dating:photos"
+	case "/dating/matches":
+		return "dating:matches"
+	case "/dating/accounts":
+		return "dating:accounts"
 	default:
 		return ""
 	}

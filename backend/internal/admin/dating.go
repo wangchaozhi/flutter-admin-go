@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"flutter-admin-go/internal/common"
 	"flutter-admin-go/internal/store"
+	"github.com/minio/minio-go/v7"
 	"gorm.io/gorm/clause"
 )
 
@@ -50,6 +52,7 @@ type DatingPhoto struct {
 	Name      string `json:"name,omitempty"`
 	Label     string `json:"label"`
 	Status    string `json:"status"`
+	URL       string `json:"url"`
 	CreatedAt string `json:"createdAt"`
 }
 
@@ -157,6 +160,45 @@ func DatingPhotoReviewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	invalidateDatingCache()
 	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok"})
+}
+
+func DatingPhotoAssetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
+		return
+	}
+	if !authorize(w, r, "") {
+		return
+	}
+	id, ok := parseID(r.URL.Path, "/api/admin/dating/photos/assets/")
+	if !ok {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid id"})
+		return
+	}
+	var photo store.MobilePhoto
+	if err := store.DB().First(&photo, id).Error; err != nil || strings.TrimSpace(photo.URL) == "" {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "photo not found"})
+		return
+	}
+	objectKey := strings.TrimPrefix(photo.URL, "/api/mobile/photos/assets/")
+	if objectKey == "" || objectKey == photo.URL {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "photo asset not found"})
+		return
+	}
+	object, err := store.ObjectClient().GetObject(context.Background(), store.AvatarBucket(), objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "photo asset not found"})
+		return
+	}
+	defer object.Close()
+	info, err := object.Stat()
+	if err != nil {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "photo asset not found"})
+		return
+	}
+	w.Header().Set("Content-Type", info.ContentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	_, _ = io.Copy(w, object)
 }
 
 func DatingMatchByIDHandler(w http.ResponseWriter, r *http.Request) {
@@ -369,7 +411,7 @@ func datingUserDTO(profile store.MobileProfile) (DatingUser, error) {
 func datingPhotoDTO(photo store.MobilePhoto) DatingPhoto {
 	return DatingPhoto{
 		ID: photo.ID, UserID: photo.UserID, Username: mobileUsername(photo.UserID), Name: mobileDisplayName(photo.UserID),
-		Label: photo.Label, Status: photo.Status, CreatedAt: photo.CreatedAt.Format(time.RFC3339),
+		Label: photo.Label, Status: photo.Status, URL: photo.URL, CreatedAt: photo.CreatedAt.Format(time.RFC3339),
 	}
 }
 

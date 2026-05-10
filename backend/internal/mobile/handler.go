@@ -1,10 +1,12 @@
 package mobile
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 
 	"flutter-admin-go/internal/common"
 	"flutter-admin-go/internal/store"
+	"github.com/minio/minio-go/v7"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -57,6 +60,7 @@ type photoDTO struct {
 	UserID    int    `json:"userId,omitempty"`
 	Label     string `json:"label"`
 	Status    string `json:"status"`
+	URL       string `json:"url"`
 	CreatedAt string `json:"createdAt,omitempty"`
 }
 
@@ -186,26 +190,94 @@ func PhotosHandler(w http.ResponseWriter, r *http.Request) {
 		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
 		return
 	}
-	var req photoPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid body"})
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid multipart form"})
 		return
 	}
-	label := strings.TrimSpace(req.Label)
-	if label == "" {
-		label = "新照片"
+	file, header, err := r.FormFile("photo")
+	if err != nil {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "photo file required"})
+		return
 	}
+	defer file.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(file, 8<<20))
+	if err != nil {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "read photo failed"})
+		return
+	}
+	contentType := http.DetectContentType(raw)
+	if contentType != "image/jpeg" && contentType != "image/png" {
+		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "only jpeg and png are supported"})
+		return
+	}
+
+	label := strings.TrimSpace(r.FormValue("label"))
+	if label == "" {
+		label = strings.TrimSuffix(header.Filename, fmt.Sprintf(".%s", strings.Split(contentType, "/")[1]))
+		if label == "" {
+			label = "个人照片"
+		}
+	}
+
+	stamp := time.Now().UnixNano()
+	ext := ".jpg"
+	if contentType == "image/png" {
+		ext = ".png"
+	}
+	objectKey := fmt.Sprintf("mobile/photos/%d/%d%s", user.ID, stamp, ext)
+
+	client := store.ObjectClient()
+	ctx := context.Background()
+	if _, err = client.PutObject(ctx, store.AvatarBucket(), objectKey, bytes.NewReader(raw), int64(len(raw)), minio.PutObjectOptions{ContentType: contentType}); err != nil {
+		common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+		return
+	}
+
+	photoURL := fmt.Sprintf("/api/mobile/photos/assets/%s", objectKey)
 	status := "pending"
 	if !photoReviewEnabled() {
 		status = "approved"
 	}
-	photo := store.MobilePhoto{UserID: user.ID, Label: label, Status: status}
+	photo := store.MobilePhoto{UserID: user.ID, Label: label, Status: status, URL: photoURL}
 	if err := store.DB().Create(&photo).Error; err != nil {
 		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: err.Error()})
 		return
 	}
 	invalidateRecommendationCache()
 	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: toPhotoDTO(photo)})
+}
+
+func PhotoAssetHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := currentUser(w, r)
+	if !ok {
+		return
+	}
+	objectKey := strings.TrimPrefix(r.URL.Path, "/api/mobile/photos/assets/")
+	if objectKey == "" {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "not found"})
+		return
+	}
+	// Verify ownership: the key starts with "mobile/photos/<userID>/"
+	expectedPrefix := fmt.Sprintf("mobile/photos/%d/", user.ID)
+	if !strings.HasPrefix(objectKey, expectedPrefix) {
+		common.WriteJSON(w, http.StatusForbidden, common.APIResponse{Code: 403, Msg: "forbidden"})
+		return
+	}
+	object, err := store.ObjectClient().GetObject(context.Background(), store.AvatarBucket(), objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "not found"})
+		return
+	}
+	defer object.Close()
+	info, err := object.Stat()
+	if err != nil {
+		common.WriteJSON(w, http.StatusNotFound, common.APIResponse{Code: 404, Msg: "not found"})
+		return
+	}
+	w.Header().Set("Content-Type", info.ContentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	_, _ = io.Copy(w, object)
 }
 
 func DeletePhotoHandler(w http.ResponseWriter, r *http.Request) {
@@ -618,7 +690,11 @@ func orderedPair(a, b int) (int, int) {
 
 func toPhotoDTO(photo store.MobilePhoto) photoDTO {
 	return photoDTO{
-		ID: photo.ID, UserID: photo.UserID, Label: photo.Label, Status: photo.Status,
+		ID:        photo.ID,
+		UserID:    photo.UserID,
+		Label:     photo.Label,
+		Status:    photo.Status,
+		URL:       photo.URL,
 		CreatedAt: photo.CreatedAt.Format(time.RFC3339),
 	}
 }
