@@ -52,7 +52,6 @@ INSERT INTO mobile_users(id, username, password, nickname) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mobile_profiles(user_id, name, city, age, height, education, job, income, marriage, intention, bio) VALUES
-  (1, '林晓', '上海', 29, 165, '本科', '产品经理', '20-30万', '未婚', '一年内结婚', '认真生活，也认真寻找可以一起过周末的人。'),
   (2, '周然', '上海', 31, 178, '硕士', '建筑设计师', '30-50万', '未婚', '认真婚恋', '喜欢展览、慢跑和做饭，希望关系里有稳定沟通。'),
   (3, '陈一鸣', '杭州', 32, 181, '本科', '软件工程师', '30-50万', '未婚', '稳定关系', '工作日写代码，周末骑行。想找一个能互相鼓励的人。'),
   (4, '顾北', '苏州', 30, 176, '硕士', '高校老师', '20-30万', '未婚', '一年内结婚', '安静但不无聊，重视家庭，也喜欢一起探索新地方。'),
@@ -70,8 +69,6 @@ ON CONFLICT (user_id) DO UPDATE SET
   bio = EXCLUDED.bio;
 
 INSERT INTO mobile_photos(id, user_id, label, status) VALUES
-  (1, 1, '生活照', 'approved'),
-  (2, 1, '旅行照', 'pending'),
   (3, 2, '主页照片', 'approved'),
   (4, 3, '主页照片', 'approved'),
   (5, 4, '主页照片', 'pending'),
@@ -80,11 +77,6 @@ ON CONFLICT (id) DO UPDATE SET
   user_id = EXCLUDED.user_id,
   label = EXCLUDED.label,
   status = EXCLUDED.status;
-
-INSERT INTO mobile_likes(from_user_id, to_user_id) VALUES
-  (2, 1),
-  (4, 1)
-ON CONFLICT (from_user_id, to_user_id) DO NOTHING;
 
 INSERT INTO admin_menus(id, name, path, parent_id, type, permission) VALUES
   (20, 'dating', '/dating', 0, 'menu', ''),

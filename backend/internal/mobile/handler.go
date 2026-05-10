@@ -376,6 +376,28 @@ func LikesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodGet {
 		var likes []store.MobileLike
+		direction := strings.TrimSpace(r.URL.Query().Get("direction"))
+		if direction == "outbound" {
+			if err := store.DB().Where(`
+				from_user_id = ?
+				AND to_user_id NOT IN (SELECT from_user_id FROM mobile_likes WHERE to_user_id = ?)
+			`, user.ID, user.ID).Order("created_at DESC, id DESC").Find(&likes).Error; err != nil {
+				common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+				return
+			}
+			result := make([]candidateDTO, 0, len(likes))
+			for _, like := range likes {
+				if like.ToUserID == user.ID {
+					continue
+				}
+				dto, err := buildCandidateDTO(user.ID, like.ToUserID)
+				if err == nil {
+					result = append(result, dto)
+				}
+			}
+			common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: result})
+			return
+		}
 		if err := store.DB().Where(`
 			to_user_id = ?
 			AND from_user_id NOT IN (SELECT to_user_id FROM mobile_likes WHERE from_user_id = ?)

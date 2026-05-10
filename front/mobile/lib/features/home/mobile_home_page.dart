@@ -27,6 +27,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
   final Set<int> _likedIds = {};
   final Set<int> _skippedIds = {};
   final List<Candidate> _likedMe = [];
+  final List<Candidate> _likedByMe = [];
   final List<Candidate> _passedCandidates = [];
   final List<MatchChat> _matches = [];
   RecommendationFilter _filter = const RecommendationFilter();
@@ -79,6 +80,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
       api.get('/api/mobile/recommendations$filterQuery', token: _token),
       api.get('/api/mobile/matches', token: _token),
       api.get('/api/mobile/likes', token: _token),
+      api.get('/api/mobile/likes?direction=outbound', token: _token),
       api.get('/api/mobile/passes', token: _token),
     ]);
 
@@ -86,7 +88,8 @@ class _MobileHomePageState extends State<MobileHomePage> {
     final recommendationData = responses[1]['data'] as List<dynamic>? ?? [];
     final matchData = responses[2]['data'] as List<dynamic>? ?? [];
     final likedMeData = responses[3]['data'] as List<dynamic>? ?? [];
-    final passData = responses[4]['data'] as List<dynamic>? ?? [];
+    final likedByMeData = responses[4]['data'] as List<dynamic>? ?? [];
+    final passData = responses[5]['data'] as List<dynamic>? ?? [];
 
     if (!mounted) return;
     setState(() {
@@ -111,6 +114,16 @@ class _MobileHomePageState extends State<MobileHomePage> {
         ..addAll(
           likedMeData.whereType<Map<String, dynamic>>().map(Candidate.fromJson),
         );
+      _likedByMe
+        ..clear()
+        ..addAll(
+          likedByMeData.whereType<Map<String, dynamic>>().map(
+            Candidate.fromJson,
+          ),
+        );
+      _likedIds
+        ..clear()
+        ..addAll(_likedByMe.map((candidate) => candidate.id));
       _passedCandidates
         ..clear()
         ..addAll(
@@ -141,6 +154,11 @@ class _MobileHomePageState extends State<MobileHomePage> {
     setState(() {
       _likedIds.add(candidate.id);
       _likedMe.removeWhere((item) => item.id == candidate.id);
+      if (matchData != null) {
+        _likedByMe.removeWhere((item) => item.id == candidate.id);
+      } else if (!_likedByMe.any((item) => item.id == candidate.id)) {
+        _likedByMe.insert(0, candidate);
+      }
     });
 
     if (!mounted) return;
@@ -161,6 +179,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
     setState(() {
       _skippedIds.add(candidate.id);
       _likedMe.removeWhere((item) => item.id == candidate.id);
+      _likedByMe.removeWhere((item) => item.id == candidate.id);
       if (!_passedCandidates.any((item) => item.id == candidate.id)) {
         _passedCandidates.insert(0, candidate);
       }
@@ -355,6 +374,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
       ),
       FootprintPage(
         likedMe: _likedMe,
+        likedByMe: _likedByMe,
         passedCandidates: _passedCandidates,
         likedIds: _likedIds,
         onLike: _like,
@@ -2029,6 +2049,7 @@ class FootprintPage extends StatefulWidget {
   const FootprintPage({
     super.key,
     required this.likedMe,
+    required this.likedByMe,
     required this.passedCandidates,
     required this.likedIds,
     required this.onLike,
@@ -2037,6 +2058,7 @@ class FootprintPage extends StatefulWidget {
   });
 
   final List<Candidate> likedMe;
+  final List<Candidate> likedByMe;
   final List<Candidate> passedCandidates;
   final Set<int> likedIds;
   final ValueChanged<Candidate> onLike;
@@ -2052,17 +2074,24 @@ class _FootprintPageState extends State<FootprintPage> {
 
   @override
   Widget build(BuildContext context) {
-    final showingLikes = _segment == 0;
-    final people = showingLikes ? widget.likedMe : widget.passedCandidates;
+    final showingLikedMe = _segment == 0;
+    final showingLikedByMe = _segment == 1;
+    final people = switch (_segment) {
+      0 => widget.likedMe,
+      1 => widget.likedByMe,
+      _ => widget.passedCandidates,
+    };
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
         PageHeader(
           title: '足迹',
-          subtitle: showingLikes
-              ? '这些人已经向你表达喜欢，回应喜欢后即可开始聊天。'
-              : '暂不考虑的人会从推荐中隐藏，你也可以重新放回推荐池。',
+          subtitle: switch (_segment) {
+            0 => '这些人已经向你表达喜欢，回应喜欢后即可开始聊天。',
+            1 => '这里记录你主动喜欢过的人，等待对方回应。',
+            _ => '暂不考虑的人会从推荐中隐藏，你也可以重新放回推荐池。',
+          },
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
@@ -2078,6 +2107,14 @@ class _FootprintPageState extends State<FootprintPage> {
               ),
               ButtonSegment(
                 value: 1,
+                icon: _NavBadge(
+                  count: widget.likedByMe.length,
+                  child: const Icon(Icons.favorite_border_rounded),
+                ),
+                label: const Text('我喜欢的'),
+              ),
+              ButtonSegment(
+                value: 2,
                 icon: const Icon(Icons.visibility_off_rounded),
                 label: const Text('暂不考虑'),
               ),
@@ -2089,17 +2126,21 @@ class _FootprintPageState extends State<FootprintPage> {
         ),
         if (people.isEmpty)
           EmptyState(
-            text: showingLikes
-                ? '还没有新的喜欢，完善资料和照片会提高曝光。'
-                : '暂不考虑列表为空，推荐页里划过的人会出现在这里。',
+            text: switch (_segment) {
+              0 => '还没有新的喜欢，完善资料和照片会提高曝光。',
+              1 => '你还没有主动喜欢的人，可以去推荐页看看。',
+              _ => '暂不考虑列表为空，推荐页里划过的人会出现在这里。',
+            },
           ),
         ...people.map(
           (candidate) => PersonTile(
             candidate: candidate,
-            subtitle: showingLikes
+            subtitle: showingLikedMe
                 ? '${candidate.age}岁 · ${candidate.job} · ${candidate.intention}'
+                : showingLikedByMe
+                ? '${candidate.age}岁 · ${candidate.city} · 等待回应'
                 : '${candidate.age}岁 · ${candidate.city} · ${candidate.job}',
-            trailing: showingLikes
+            trailing: showingLikedMe
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -2117,6 +2158,8 @@ class _FootprintPageState extends State<FootprintPage> {
                       ),
                     ],
                   )
+                : showingLikedByMe
+                ? const Icon(Icons.schedule_rounded, color: Color(0xFF9CA3AF))
                 : OutlinedButton.icon(
                     onPressed: () => widget.onRestorePass(candidate),
                     icon: const Icon(Icons.undo_rounded),

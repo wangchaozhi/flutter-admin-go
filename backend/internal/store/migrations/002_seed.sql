@@ -37,13 +37,6 @@ ON CONFLICT (id) DO UPDATE SET
   nickname = EXCLUDED.nickname,
   role_ids = EXCLUDED.role_ids;
 
-INSERT INTO mobile_users(id, username, password, nickname) VALUES
-  (1, 'user', '123456', 'mobile user')
-ON CONFLICT (id) DO UPDATE SET
-  username = EXCLUDED.username,
-  password = EXCLUDED.password,
-  nickname = EXCLUDED.nickname;
-
 SELECT setval(pg_get_serial_sequence('admin_menus', 'id'), COALESCE((SELECT MAX(id) FROM admin_menus), 1));
 SELECT setval(pg_get_serial_sequence('admin_roles', 'id'), COALESCE((SELECT MAX(id) FROM admin_roles), 1));
 SELECT setval(pg_get_serial_sequence('admin_users', 'id'), COALESCE((SELECT MAX(id) FROM admin_users), 1));
