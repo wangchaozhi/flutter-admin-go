@@ -26,6 +26,8 @@ class _MobileHomePageState extends State<MobileHomePage> {
   final List<Candidate> _candidates = [];
   final Set<int> _likedIds = {};
   final Set<int> _skippedIds = {};
+  final List<Candidate> _likedMe = [];
+  final List<Candidate> _passedCandidates = [];
   final List<MatchChat> _matches = [];
   RecommendationFilter _filter = const RecommendationFilter();
 
@@ -76,11 +78,15 @@ class _MobileHomePageState extends State<MobileHomePage> {
       api.get('/api/mobile/profile', token: _token),
       api.get('/api/mobile/recommendations$filterQuery', token: _token),
       api.get('/api/mobile/matches', token: _token),
+      api.get('/api/mobile/likes', token: _token),
+      api.get('/api/mobile/passes', token: _token),
     ]);
 
     final profileData = responses[0]['data'] as Map<String, dynamic>? ?? {};
     final recommendationData = responses[1]['data'] as List<dynamic>? ?? [];
     final matchData = responses[2]['data'] as List<dynamic>? ?? [];
+    final likedMeData = responses[3]['data'] as List<dynamic>? ?? [];
+    final passData = responses[4]['data'] as List<dynamic>? ?? [];
 
     if (!mounted) return;
     setState(() {
@@ -100,6 +106,19 @@ class _MobileHomePageState extends State<MobileHomePage> {
               .map((item) => MatchChat.fromJson(item, _candidates))
               .whereType<MatchChat>(),
         );
+      _likedMe
+        ..clear()
+        ..addAll(
+          likedMeData.whereType<Map<String, dynamic>>().map(Candidate.fromJson),
+        );
+      _passedCandidates
+        ..clear()
+        ..addAll(
+          passData.whereType<Map<String, dynamic>>().map(Candidate.fromJson),
+        );
+      _skippedIds
+        ..clear()
+        ..addAll(_passedCandidates.map((candidate) => candidate.id));
       _usingApi = true;
       _loading = false;
       _loadError = '';
@@ -121,6 +140,7 @@ class _MobileHomePageState extends State<MobileHomePage> {
     }
     setState(() {
       _likedIds.add(candidate.id);
+      _likedMe.removeWhere((item) => item.id == candidate.id);
     });
 
     if (!mounted) return;
@@ -138,7 +158,25 @@ class _MobileHomePageState extends State<MobileHomePage> {
     await ApiClient().post('/api/mobile/passes', {
       'targetUserId': candidate.id,
     }, token: _token);
-    setState(() => _skippedIds.add(candidate.id));
+    setState(() {
+      _skippedIds.add(candidate.id);
+      _likedMe.removeWhere((item) => item.id == candidate.id);
+      if (!_passedCandidates.any((item) => item.id == candidate.id)) {
+        _passedCandidates.insert(0, candidate);
+      }
+    });
+  }
+
+  void _restorePass(Candidate candidate) async {
+    await ApiClient().delete(
+      '/api/mobile/passes?targetUserId=${candidate.id}',
+      token: _token,
+    );
+    setState(() {
+      _skippedIds.remove(candidate.id);
+      _passedCandidates.removeWhere((item) => item.id == candidate.id);
+    });
+    _loadRemoteState();
   }
 
   void _saveProfile(DatingProfile profile) async {
@@ -315,6 +353,14 @@ class _MobileHomePageState extends State<MobileHomePage> {
         onOpenFilters: _openFilters,
         onRefresh: _loadRemoteState,
       ),
+      FootprintPage(
+        likedMe: _likedMe,
+        passedCandidates: _passedCandidates,
+        likedIds: _likedIds,
+        onLike: _like,
+        onSkip: _skip,
+        onRestorePass: _restorePass,
+      ),
       MatchPage(matches: _matches, onOpenChat: _openChat),
       ChatListPage(matches: _matches, onOpenChat: _openChat),
     ];
@@ -378,6 +424,17 @@ class _MobileHomePageState extends State<MobileHomePage> {
             icon: Icon(Icons.favorite_border_rounded),
             selectedIcon: Icon(Icons.favorite_rounded),
             label: '推荐',
+          ),
+          NavigationDestination(
+            icon: _NavBadge(
+              count: _likedMe.length,
+              child: const Icon(Icons.auto_awesome_outlined),
+            ),
+            selectedIcon: _NavBadge(
+              count: _likedMe.length,
+              child: const Icon(Icons.auto_awesome_rounded),
+            ),
+            label: '足迹',
           ),
           const NavigationDestination(
             icon: Icon(Icons.group_outlined),
@@ -448,7 +505,12 @@ class ProfilePhoto {
   final PhotoStatus status;
   final String url;
 
-  ProfilePhoto copyWith({String? id, String? label, PhotoStatus? status, String? url}) {
+  ProfilePhoto copyWith({
+    String? id,
+    String? label,
+    PhotoStatus? status,
+    String? url,
+  }) {
     return ProfilePhoto(
       id: id ?? this.id,
       label: label ?? this.label,
@@ -1847,7 +1909,9 @@ class PhotoTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.45),
-              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(8),
+              ),
             ),
             child: Center(
               child: Container(
@@ -1922,7 +1986,11 @@ class _PhotoPlaceholder extends StatelessWidget {
 }
 
 class _PhotoImage extends StatelessWidget {
-  const _PhotoImage({required this.url, required this.token, required this.status});
+  const _PhotoImage({
+    required this.url,
+    required this.token,
+    required this.status,
+  });
 
   final String url;
   final String? token;
@@ -1937,7 +2005,8 @@ class _PhotoImage extends StatelessWidget {
       width: double.infinity,
       height: double.infinity,
       headers: {
-        if (token != null && token!.isNotEmpty) 'Authorization': 'Bearer $token',
+        if (token != null && token!.isNotEmpty)
+          'Authorization': 'Bearer $token',
       },
       errorBuilder: (context, error, stack) => const Center(
         child: Icon(Icons.broken_image_rounded, color: Color(0xFFE85D75)),
@@ -1952,6 +2021,110 @@ class _PhotoImage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class FootprintPage extends StatefulWidget {
+  const FootprintPage({
+    super.key,
+    required this.likedMe,
+    required this.passedCandidates,
+    required this.likedIds,
+    required this.onLike,
+    required this.onSkip,
+    required this.onRestorePass,
+  });
+
+  final List<Candidate> likedMe;
+  final List<Candidate> passedCandidates;
+  final Set<int> likedIds;
+  final ValueChanged<Candidate> onLike;
+  final ValueChanged<Candidate> onSkip;
+  final ValueChanged<Candidate> onRestorePass;
+
+  @override
+  State<FootprintPage> createState() => _FootprintPageState();
+}
+
+class _FootprintPageState extends State<FootprintPage> {
+  int _segment = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final showingLikes = _segment == 0;
+    final people = showingLikes ? widget.likedMe : widget.passedCandidates;
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        PageHeader(
+          title: '足迹',
+          subtitle: showingLikes
+              ? '这些人已经向你表达喜欢，回应喜欢后即可开始聊天。'
+              : '暂不考虑的人会从推荐中隐藏，你也可以重新放回推荐池。',
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+          child: SegmentedButton<int>(
+            segments: [
+              ButtonSegment(
+                value: 0,
+                icon: _NavBadge(
+                  count: widget.likedMe.length,
+                  child: const Icon(Icons.favorite_rounded),
+                ),
+                label: const Text('喜欢我的'),
+              ),
+              ButtonSegment(
+                value: 1,
+                icon: const Icon(Icons.visibility_off_rounded),
+                label: const Text('暂不考虑'),
+              ),
+            ],
+            selected: {_segment},
+            onSelectionChanged: (value) =>
+                setState(() => _segment = value.first),
+          ),
+        ),
+        if (people.isEmpty)
+          EmptyState(
+            text: showingLikes
+                ? '还没有新的喜欢，完善资料和照片会提高曝光。'
+                : '暂不考虑列表为空，推荐页里划过的人会出现在这里。',
+          ),
+        ...people.map(
+          (candidate) => PersonTile(
+            candidate: candidate,
+            subtitle: showingLikes
+                ? '${candidate.age}岁 · ${candidate.job} · ${candidate.intention}'
+                : '${candidate.age}岁 · ${candidate.city} · ${candidate.job}',
+            trailing: showingLikes
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        tooltip: '暂不考虑',
+                        onPressed: () => widget.onSkip(candidate),
+                      ),
+                      FilledButton.icon(
+                        onPressed: widget.likedIds.contains(candidate.id)
+                            ? null
+                            : () => widget.onLike(candidate),
+                        icon: const Icon(Icons.favorite_rounded),
+                        label: const Text('回应'),
+                      ),
+                    ],
+                  )
+                : OutlinedButton.icon(
+                    onPressed: () => widget.onRestorePass(candidate),
+                    icon: const Icon(Icons.undo_rounded),
+                    label: const Text('恢复'),
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2045,6 +2218,7 @@ class _ChatPageState extends State<ChatPage> {
   final _controller = TextEditingController();
   Timer? _pollTimer;
   WebSocketChannel? _channel;
+  StreamSubscription? _wsSubscription;
   bool _sending = false;
   bool _loadingMessages = false;
   bool _wsConnected = false;
@@ -2062,12 +2236,16 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _wsSubscription?.cancel();
+    _wsSubscription = null;
     _channel?.sink.close();
     _controller.dispose();
     super.dispose();
   }
 
   void _connectWebSocket() {
+    _wsSubscription?.cancel();
+    _wsSubscription = null;
     _channel?.sink.close();
     final encodedToken = Uri.encodeComponent(widget.token);
     final uri = Uri.parse(
@@ -2082,7 +2260,7 @@ class _ChatPageState extends State<ChatPage> {
         _wsConnected = true;
         _error = '';
       });
-      channel.stream.listen(
+      _wsSubscription = channel.stream.listen(
         _handleWebSocketEvent,
         onError: (Object error) {
           if (!mounted) return;

@@ -339,8 +339,9 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 	query := store.DB().Where(`
 		user_id <> ?
 		AND user_id NOT IN (SELECT to_user_id FROM mobile_passes WHERE from_user_id = ?)
+		AND user_id NOT IN (SELECT from_user_id FROM mobile_passes WHERE to_user_id = ?)
 		AND user_id NOT IN (SELECT to_user_id FROM mobile_likes WHERE from_user_id = ?)
-	`, user.ID, user.ID, user.ID).Order("user_id ASC")
+	`, user.ID, user.ID, user.ID, user.ID).Order("user_id ASC")
 	if city != "" && city != "全部" {
 		query = query.Where("city = ?", city)
 	}
@@ -350,6 +351,9 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	result := []candidateDTO{}
 	for _, profile := range profiles {
+		if profile.UserID == user.ID {
+			continue
+		}
 		dto, err := buildCandidateDTO(user.ID, profile.UserID)
 		if err != nil {
 			continue
@@ -370,6 +374,29 @@ func LikesHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.Method == http.MethodGet {
+		var likes []store.MobileLike
+		if err := store.DB().Where(`
+			to_user_id = ?
+			AND from_user_id NOT IN (SELECT to_user_id FROM mobile_likes WHERE from_user_id = ?)
+			AND from_user_id NOT IN (SELECT to_user_id FROM mobile_passes WHERE from_user_id = ?)
+		`, user.ID, user.ID, user.ID).Order("created_at DESC, id DESC").Find(&likes).Error; err != nil {
+			common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+			return
+		}
+		result := make([]candidateDTO, 0, len(likes))
+		for _, like := range likes {
+			if like.FromUserID == user.ID {
+				continue
+			}
+			dto, err := buildCandidateDTO(user.ID, like.FromUserID)
+			if err == nil {
+				result = append(result, dto)
+			}
+		}
+		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: result})
+		return
+	}
 	if r.Method != http.MethodPost {
 		common.WriteJSON(w, http.StatusMethodNotAllowed, common.APIResponse{Code: 405, Msg: "method not allowed"})
 		return
@@ -379,7 +406,7 @@ func LikesHandler(w http.ResponseWriter, r *http.Request) {
 		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid target"})
 		return
 	}
-	var matched *matchDTO
+	var matchedID int
 	err := store.DB().Transaction(func(tx *gorm.DB) error {
 		like := store.MobileLike{FromUserID: user.ID, ToUserID: req.TargetUserID}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&like).Error; err != nil {
@@ -402,16 +429,29 @@ func LikesHandler(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		dto, err := buildMatchDTO(user.ID, match)
-		if err != nil {
+		if err := createMatchGreeting(tx, match.ID, user.ID); err != nil {
 			return err
 		}
-		matched = &dto
+		matchedID = match.ID
 		return nil
 	})
 	if err != nil {
 		common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: err.Error()})
 		return
+	}
+	var matched *matchDTO
+	if matchedID > 0 {
+		var match store.MobileMatch
+		if err := store.DB().First(&match, matchedID).Error; err != nil {
+			common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+			return
+		}
+		dto, err := buildMatchDTO(user.ID, match)
+		if err != nil {
+			common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+			return
+		}
+		matched = &dto
 	}
 	invalidateRecommendationCache()
 	common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: map[string]interface{}{"matched": matched != nil, "match": matched}})
@@ -420,6 +460,39 @@ func LikesHandler(w http.ResponseWriter, r *http.Request) {
 func PassesHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := currentUser(w, r)
 	if !ok {
+		return
+	}
+	if r.Method == http.MethodGet {
+		var passes []store.MobilePass
+		if err := store.DB().Where("from_user_id = ?", user.ID).Order("created_at DESC, id DESC").Find(&passes).Error; err != nil {
+			common.WriteJSON(w, http.StatusInternalServerError, common.APIResponse{Code: 500, Msg: err.Error()})
+			return
+		}
+		result := make([]candidateDTO, 0, len(passes))
+		for _, pass := range passes {
+			if pass.ToUserID == user.ID {
+				continue
+			}
+			dto, err := buildCandidateDTO(user.ID, pass.ToUserID)
+			if err == nil {
+				result = append(result, dto)
+			}
+		}
+		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok", Data: result})
+		return
+	}
+	if r.Method == http.MethodDelete {
+		targetID, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("targetUserId")))
+		if targetID <= 0 {
+			common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: "invalid target"})
+			return
+		}
+		if err := store.DB().Where("from_user_id = ? AND to_user_id = ?", user.ID, targetID).Delete(&store.MobilePass{}).Error; err != nil {
+			common.WriteJSON(w, http.StatusBadRequest, common.APIResponse{Code: 400, Msg: err.Error()})
+			return
+		}
+		invalidateRecommendationCache()
+		common.WriteJSON(w, http.StatusOK, common.APIResponse{Code: 0, Msg: "ok"})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -658,6 +731,49 @@ func markMatchRead(matchID, userID int) error {
 		Columns:   []clause.Column{{Name: "match_id"}, {Name: "user_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"last_read_at"}),
 	}).Create(&record).Error
+}
+
+func createMatchGreeting(tx *gorm.DB, matchID, senderID int) error {
+	var count int64
+	if err := tx.Model(&store.MobileMessage{}).Where("match_id = ?", matchID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	text := selectGreetingText(tx, matchID, senderID)
+	return tx.Create(&store.MobileMessage{MatchID: matchID, SenderID: senderID, Content: text}).Error
+}
+
+func selectGreetingText(tx *gorm.DB, matchID, senderID int) string {
+	templates := defaultGreetingTemplates()
+	var setting store.AppSetting
+	if err := tx.Where("key = ?", "dating.greeting_templates").First(&setting).Error; err == nil {
+		var values []string
+		if json.Unmarshal([]byte(setting.Value), &values) == nil {
+			cleaned := make([]string, 0, len(values))
+			for _, value := range values {
+				value = strings.TrimSpace(value)
+				if value != "" {
+					cleaned = append(cleaned, value)
+				}
+			}
+			if len(cleaned) > 0 {
+				templates = cleaned
+			}
+		}
+	}
+	index := (matchID + senderID + time.Now().Nanosecond()) % len(templates)
+	return templates[index]
+}
+
+func defaultGreetingTemplates() []string {
+	return []string{
+		"很开心和你互相喜欢，想先和你打个招呼。",
+		"看到我们匹配成功了，期待慢慢了解你。",
+		"你好呀，感觉我们的资料挺合拍，想和你聊聊。",
+		"谢谢你的喜欢，我们从一个轻松的问候开始吧。",
+	}
 }
 
 func photoReviewEnabled() bool {
