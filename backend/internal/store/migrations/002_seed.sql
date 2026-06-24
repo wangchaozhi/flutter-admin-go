@@ -29,7 +29,7 @@ ON CONFLICT (id) DO UPDATE SET
   menu_ids = EXCLUDED.menu_ids;
 
 INSERT INTO admin_users(id, username, password, nickname, role_ids) VALUES
-  (1, 'admin', '123456', 'administrator', '[1]'::jsonb),
+  (1, 'admin', 'admin', 'administrator', '[1]'::jsonb),
   (2, 'operator', '123456', 'operator user', '[2]'::jsonb)
 ON CONFLICT (id) DO UPDATE SET
   username = EXCLUDED.username,
